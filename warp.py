@@ -305,27 +305,27 @@ def build_warp_command(source_file, output_file, output_format='envi',
             and (max_x is not None) and (max_y is not None)):
 
         debug("Image Extents: %s, %s, %s, %s" % (min_x, min_y, max_x, max_y))
-        cmd += ['-te', min_x.strip(), min_y.strip(),
-                max_x.strip(), max_y.strip()]
+        cmd.extend(['-te', min_x.strip(), min_y.strip(), max_x.strip(),
+                    max_y.strip()])
 
     # Resize the pixels
     if pixel_size is not None:
-        cmd += ['-tr', pixel_size, pixel_size]
+        cmd.extend(['-tr', pixel_size, pixel_size])
 
     # Reproject the data
     if projection is not None:
-        cmd += ['-t_srs']
-        cmd += [projection]  # ***DO NOT*** split the projection string
+        # ***DO NOT*** split the projection string
+        cmd.extend(['-t_srs', projection])
 
     # Specify the resampling method
     if resample_method is not None:
-        cmd += ['-r', resample_method]
+        cmd.extend(['-r', resample_method])
 
     if no_data_value is not None:
-        cmd += ['-srcnodata', no_data_value]
-        cmd += ['-dstnodata', no_data_value]
+        cmd.extend(['-srcnodata', no_data_value])
+        cmd.extend(['-dstnodata', no_data_value])
 
-    cmd += [source_file, output_file]
+    cmd.extend([source_file, output_file])
 
     return cmd
 # END - build_warp_command
@@ -1055,7 +1055,7 @@ def warp_science_products(parms, xml_filename=None):
 
         # Now warp the GeoTIFF files
         what_to_warp = glob.glob('*.TIF')
-        what_to_warp += glob.glob('*.tif')  # capture the browse
+        what_to_warp.extend(glob.glob('*.tif'))  # capture the browse
         output_format = 'gtiff'
         for filename in what_to_warp:
             log("Processing %s" % filename)
