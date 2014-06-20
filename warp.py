@@ -486,10 +486,8 @@ def convert_hdf_to_gtiff(hdf_file):
         metadata_filename = '%s-global_metadata.txt' % hdf_name
 
         log("Writing global metadata to %s" % metadata_filename)
-        fd = open(metadata_filename, 'w+')
-        fd.write(str(metadata))
-        fd.flush()
-        fd.close()
+        with open(metadata_filename, 'w+') as metadata_fd:
+            metadata_fd.write(str(metadata))
 
     # Extract the subdatasets into individual GeoTIFF files
     if hdf_has_subdatasets(hdf_file):
@@ -827,11 +825,9 @@ def update_espa_xml(parms, xml, xml_filename, datum=WGS84):
         # Write out a new XML file after validation
         log("---- Validating XML Modifications and Creating Temp Output File")
         tmp_xml_filename = 'tmp-%s' % xml_filename
-        fd = open(tmp_xml_filename, 'w')
-        # Call the export with validation
-        metadata_api.export(fd, xml)
-        fd.flush()
-        fd.close()
+        with open(tmp_xml_filename, 'w') as tmp_fd:
+            # Call the export with validation
+            metadata_api.export(tmp_fd, xml)
 
         # Remove the original
         if os.path.exists(xml_filename):
@@ -956,39 +952,36 @@ def warp_espa_data(parms, xml_filename=None):
 
             # Update the tmp ENVI header with our own values for some fields
             sb = StringIO()
-            fd = open(tmp_hdr_filename, 'r')
-            while 1:
-                line = fd.readline()
-                if not line:
-                    break
-                if (line.startswith('data ignore value')
-                        or line.startswith('description')):
-                    dummy = 'Nothing'
-                else:
-                    sb.write(line)
+            with open(tmp_hdr_filename, 'r') as tmp_fd:
+                while True:
+                    line = tmp_fd.readline()
+                    if not line:
+                        break
+                    if (line.startswith('data ignore value')
+                            or line.startswith('description')):
+                        dummy = 'Nothing'
+                    else:
+                        sb.write(line)
 
-                if line.startswith('description'):
-                    # This may be on multiple lines so read lines until found
-                    if not line.strip().endswith('}'):
-                        while 1:
-                            next_line = fd.readline()
-                            if (not next_line
-                                    or next_line.strip().endswith('}')):
-                                break
-                    sb.write('description = {ESPA-generated file}\n')
-                elif line.startswith('data type'):
-                    sb.write('data ignore value = %s\n' % no_data_value)
-                elif line.startswith('map info'):
-                    map_info_str = line
+                    if line.startswith('description'):
+                        # This may be on multiple lines so read lines until
+                        # found
+                        if not line.strip().endswith('}'):
+                            while 1:
+                                next_line = tmp_fd.readline()
+                                if (not next_line
+                                        or next_line.strip().endswith('}')):
+                                    break
+                        sb.write('description = {ESPA-generated file}\n')
+                    elif line.startswith('data type'):
+                        sb.write('data ignore value = %s\n' % no_data_value)
+                    elif line.startswith('map info'):
+                        map_info_str = line
+            # END - with tmp_fd
 
-            fd.close()
-            sb.flush()
-
-            # Do the actual update here
-            fd = open(tmp_hdr_filename, 'w')
-            fd.write(sb.getvalue())
-            fd.flush()
-            fd.close()
+            # Do the actual replace here
+            with open(tmp_hdr_filename, 'w') as tmp_fd:
+                tmp_fd.write(sb.getvalue())
 
             # Remove the original files, they are replaced in following code
             if os.path.exists(img_filename):
