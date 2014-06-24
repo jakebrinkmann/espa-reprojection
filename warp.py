@@ -67,12 +67,10 @@ def build_sinu_proj4_string(central_meridian, false_easting, false_northing):
 
     global SINUSOIDAL_SPHERE_RADIUS
 
-    proj4_string = "'+proj=sinu +lon_0=%f +x_0=%f +y_0=%f +a=%f +b=%f" \
-                   " +ellps=WGS84 +datum=WGS84" \
-                   " +units=m +no_defs'" % (central_meridian, false_easting,
-                                            false_northing,
-                                            SINUSOIDAL_SPHERE_RADIUS,
-                                            SINUSOIDAL_SPHERE_RADIUS)
+    proj4_string = ("'+proj=sinu +lon_0=%f +x_0=%f +y_0=%f +a=%f +b=%f"
+                    " +ellps=WGS84 +datum=WGS84 +units=m +no_defs'"
+                    % (central_meridian, false_easting, false_northing,
+                       SINUSOIDAL_SPHERE_RADIUS, SINUSOIDAL_SPHERE_RADIUS))
 
     return proj4_string
 # END - build_sinu_proj4_string
@@ -91,11 +89,11 @@ def build_albers_proj4_string(std_parallel_1, std_parallel_2, origin_lat,
       +ellps=GRS80 +datum=NAD83 +units=m +no_defs
     '''
 
-    proj4_string = "'+proj=aea +lat_1=%f +lat_2=%f +lat_0=%f +lon_0=%f" \
-                   " +x_0=%f +y_0=%f +ellps=GRS80 +datum=%s +units=m" \
-                   " +no_defs'" % (std_parallel_1, std_parallel_2, origin_lat,
-                                   central_meridian, false_easting,
-                                   false_northing, datum)
+    proj4_string = ("'+proj=aea +lat_1=%f +lat_2=%f +lat_0=%f +lon_0=%f"
+                    " +x_0=%f +y_0=%f +ellps=GRS80 +datum=%s +units=m"
+                    " +no_defs'"
+                    % (std_parallel_1, std_parallel_2, origin_lat,
+                       central_meridian, false_easting, false_northing, datum))
 
     return proj4_string
 # END - build_albers_proj4_string
@@ -123,12 +121,12 @@ def build_utm_proj4_string(utm_zone, north_south):
 
     proj4_string = ''
     if str(north_south).lower() == 'north':
-        proj4_string = "'+proj=utm +zone=%i +ellps=WGS84 +datum=WGS84" \
-                       " +units=m +no_defs'" % utm_zone
+        proj4_string = ("'+proj=utm +zone=%i +ellps=WGS84 +datum=WGS84"
+                        " +units=m +no_defs'" % utm_zone)
     elif str(north_south).lower() == 'south':
-        proj4_string = "'+proj=utm +zone=%i +south +ellps=WGS72" \
-                       " +towgs84=0,0,1.9,0,0,0.814,-0.38 +units=m +no_defs'" \
-                       % utm_zone
+        proj4_string = ("'+proj=utm +zone=%i +south +ellps=WGS72"
+                        " +towgs84=0,0,1.9,0,0,0.814,-0.38 +units=m +no_defs'"
+                        % utm_zone)
     else:
         raise ValueError("Invalid north_south argument[%s]"
                          " Argument must be one of 'north' or 'south'"
@@ -164,10 +162,9 @@ def build_ps_proj4_string(lat_ts, lon_pole, north_south,
                          " Argument must be one of 'north' or 'south'"
                          % north_south)
 
-    proj4_string = "'+proj=stere"
-    proj4_string += " +lat_ts=%f %s +lon_0=%f +k_0=1.0 +x_0=%f +y_0=%f" \
-        % (lat_ts, lat_o, lon_pole, false_easting, false_northing)
-    proj4_string += " +datum=WGS84 +units=m +no_defs'"
+    proj4_string = ("'+proj=stere +lat_ts=%f %s +lon_0=%f +k_0=1.0 +x_0=%f"
+                    " +y_0=%f +datum=WGS84 +units=m +no_defs'"
+                    % (lat_ts, lat_o, lon_pole, false_easting, false_northing))
 
     return proj4_string
 # END - build_ps_proj4_string
@@ -338,8 +335,7 @@ def parse_hdf_subdatasets(hdf_file):
       Finds all the subdataset names in an hdf file
     '''
 
-    cmd = ['gdalinfo', hdf_file]
-    cmd = ' '.join(cmd)
+    cmd = ' '.join(['gdalinfo', hdf_file])
     output = util.execute_cmd(cmd)
     name = ''
     description = ''
@@ -369,8 +365,7 @@ def get_no_data_value(filename):
       TODO TODO TODO
     '''
 
-    cmd = ['gdalinfo', filename]
-    cmd = ' '.join(cmd)
+    cmd = ' '.join(['gdalinfo', filename])
     output = util.execute_cmd(cmd)
 
     no_data_value = None
@@ -426,8 +421,7 @@ def get_hdf_global_metadata(hdf_file):
     Note: Works with Ledaps and Modis generated HDF files
     '''
 
-    cmd = ['gdalinfo', hdf_file]
-    cmd = ' '.join(cmd)
+    cmd = ' '.join(['gdalinfo', hdf_file])
     output = util.execute_cmd(cmd)
 
     sb = StringIO()
@@ -458,8 +452,7 @@ def hdf_has_subdatasets(hdf_file):
         Determine if the HDF file has subdatasets
     '''
 
-    cmd = ['gdalinfo', hdf_file]
-    cmd = ' '.join(cmd)
+    cmd = ' '.join(['gdalinfo', hdf_file])
     output = util.execute_cmd(cmd)
 
     for line in output.split('\n'):
@@ -497,7 +490,7 @@ def convert_hdf_to_gtiff(hdf_file):
             subdata_name = sds_parts[len(sds_parts) - 1]
             # Quote the sds name due to possible spaces
             # Must be single because have double quotes in sds name
-            quoted_sds_name = "'" + sds_name + "'"
+            quoted_sds_name = "'%s'" % sds_name
             no_data_value = get_no_data_value(quoted_sds_name)
 
             # Split the description into part to extract the string
@@ -1110,10 +1103,9 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
         if input_format == 'envi' and output_format == 'gtiff':
             gtiff_name = metadata_filename.rstrip('.xml')
             # Call with deletion of source files
-            cmd = ['convert_espa_to_gtif', '--del_src_files',
-                   '--xml', metadata_filename,
-                   '--gtif', gtiff_name]
-            cmd = ' '.join(cmd)
+            cmd = ' '.join(['convert_espa_to_gtif', '--del_src_files',
+                            '--xml', metadata_filename,
+                            '--gtif', gtiff_name])
 
             output = ''
             try:
@@ -1121,7 +1113,7 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
 
                 # Rename the XML file back to *.xml from *_gtif.xml
                 meta_gtiff_name = metadata_filename.split('.xml')[0]
-                meta_gtiff_name += '_gtif.xml'
+                meta_gtiff_name = ''.join([meta_gtiff_name, '_gtif.xml'])
 
                 os.rename(meta_gtiff_name, metadata_filename)
             except Exception, e:
@@ -1136,10 +1128,9 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
             # convert_espa_to_hdf
             hdf_name = metadata_filename.replace('.xml', '.hdf')
             # Call with deletion of source files
-            cmd = ['convert_espa_to_hdf', '--del_src_files',
-                   '--xml', metadata_filename,
-                   '--hdf', hdf_name]
-            cmd = ' '.join(cmd)
+            cmd = ' '.join(['convert_espa_to_hdf', '--del_src_files',
+                            '--xml', metadata_filename,
+                            '--hdf', hdf_name])
 
             output = ''
             try:
@@ -1147,7 +1138,7 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
 
                 # Rename the XML file back to *.xml from *_hdf.xml
                 meta_hdf_name = metadata_filename.split('.')[0]
-                meta_hdf_name += '_hdf.xml'
+                meta_hdf_name = ''.join([meta_hdf_name, '_hdf.xml'])
 
                 os.rename(meta_hdf_name, metadata_filename)
             except Exception, e:
