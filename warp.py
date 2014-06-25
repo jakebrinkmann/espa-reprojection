@@ -100,7 +100,7 @@ def build_albers_proj4_string(std_parallel_1, std_parallel_2, origin_lat,
 
 
 # ============================================================================
-def build_utm_proj4_string(utm_zone, north_south):
+def build_utm_proj4_string(utm_zone, utm_north_south):
     '''
     Description:
       Builds a proj.4 string for utm
@@ -120,24 +120,24 @@ def build_utm_proj4_string(utm_zone, north_south):
     # TODO - +proj=utm +zone=60 +datum=WGS84 +units=m +no_defs
 
     proj4_string = ''
-    if str(north_south).lower() == 'north':
+    if str(utm_north_south).lower() == 'north':
         proj4_string = ("'+proj=utm +zone=%i +ellps=WGS84 +datum=WGS84"
                         " +units=m +no_defs'" % utm_zone)
-    elif str(north_south).lower() == 'south':
+    elif str(utm_north_south).lower() == 'south':
         proj4_string = ("'+proj=utm +zone=%i +south +ellps=WGS72"
                         " +towgs84=0,0,1.9,0,0,0.814,-0.38 +units=m +no_defs'"
                         % utm_zone)
     else:
-        raise ValueError("Invalid north_south argument[%s]"
+        raise ValueError("Invalid utm_north_south argument[%s]"
                          " Argument must be one of 'north' or 'south'"
-                         % north_south)
+                         % utm_north_south)
 
     return proj4_string
 # END - build_utm_proj4_string
 
 
 # ============================================================================
-def build_ps_proj4_string(lat_ts, lon_pole, north_south,
+def build_ps_proj4_string(lat_ts, lon_pole, origin_lat,
                           false_easting, false_northing):
     '''
     Description:
@@ -152,19 +152,10 @@ def build_ps_proj4_string(lat_ts, lon_pole, north_south,
         +datum=WGS84 +units=m +no_defs
     '''
 
-    lat_o = ''
-    if str(north_south).lower() == 'north':
-        lat_o = '+lat_0=%f' % 90
-    elif str(north_south).lower() == 'south':
-        lat_o = '+lat_0=%f' % -90
-    else:
-        raise ValueError("Invalid north_south argument[%s]"
-                         " Argument must be one of 'north' or 'south'"
-                         % north_south)
-
-    proj4_string = ("'+proj=stere +lat_ts=%f %s +lon_0=%f +k_0=1.0 +x_0=%f"
-                    " +y_0=%f +datum=WGS84 +units=m +no_defs'"
-                    % (lat_ts, lat_o, lon_pole, false_easting, false_northing))
+    proj4_string = ("'+proj=stere +lat_ts=%f +lat_0=%f +lon_0=%f +k_0=1.0"
+                    " +x_0=%f +y_0=%f +datum=WGS84 +units=m +no_defs'"
+                    % (lat_ts, origin_lat, lon_pole,
+                       false_easting, false_northing))
 
     return proj4_string
 # END - build_ps_proj4_string
@@ -219,12 +210,12 @@ def convert_target_projection_to_proj4(parms):
     elif target_projection == "utm":
         projection = \
             build_utm_proj4_string(int(parms['utm_zone']),
-                                   parms['north_south'])
+                                   parms['utm_north_south'])
 
     elif target_projection == "ps":
         projection = build_ps_proj4_string(float(parms['latitude_true_scale']),
                                            float(parms['longitude_pole']),
-                                           parms['north_south'],
+                                           float(parms['origin_lat']),
                                            float(parms['false_easting']),
                                            float(parms['false_northing']))
 
