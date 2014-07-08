@@ -193,31 +193,31 @@ def convert_target_projection_to_proj4(parms):
 
     if target_projection == "sinu":
         projection = \
-            build_sinu_proj4_string(float(parms['central_meridian']),
-                                    float(parms['false_easting']),
-                                    float(parms['false_northing']))
+            build_sinu_proj4_string(parms['central_meridian'],
+                                    parms['false_easting'],
+                                    parms['false_northing'])
 
     elif target_projection == "aea":
         projection = \
-            build_albers_proj4_string(float(parms['std_parallel_1']),
-                                      float(parms['std_parallel_2']),
-                                      float(parms['origin_lat']),
-                                      float(parms['central_meridian']),
-                                      float(parms['false_easting']),
-                                      float(parms['false_northing']),
+            build_albers_proj4_string(parms['std_parallel_1'],
+                                      parms['std_parallel_2'],
+                                      parms['origin_lat'],
+                                      parms['central_meridian'],
+                                      parms['false_easting'],
+                                      parms['false_northing'],
                                       parms['datum'])
 
     elif target_projection == "utm":
         projection = \
-            build_utm_proj4_string(int(parms['utm_zone']),
+            build_utm_proj4_string(parms['utm_zone'],
                                    parms['utm_north_south'])
 
     elif target_projection == "ps":
-        projection = build_ps_proj4_string(float(parms['latitude_true_scale']),
-                                           float(parms['longitude_pole']),
-                                           float(parms['origin_lat']),
-                                           float(parms['false_easting']),
-                                           float(parms['false_northing']))
+        projection = build_ps_proj4_string(parms['latitude_true_scale'],
+                                           parms['longitude_pole'],
+                                           parms['origin_lat'],
+                                           parms['false_easting'],
+                                           parms['false_northing'])
 
     elif target_projection == "lonlat":
         projection = build_geographic_proj4_string()
@@ -293,8 +293,7 @@ def build_warp_command(source_file, output_file, output_format='envi',
             and (max_x is not None) and (max_y is not None)):
 
         debug("Image Extents: %s, %s, %s, %s" % (min_x, min_y, max_x, max_y))
-        cmd.extend(['-te', min_x.strip(), min_y.strip(), max_x.strip(),
-                    max_y.strip()])
+        cmd.extend(['-te', str(min_x), str(min_y), str(max_x), str(max_y)])
 
     # Resize the pixels
     if pixel_size is not None:
