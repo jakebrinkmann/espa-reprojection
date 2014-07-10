@@ -1114,7 +1114,7 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
                     log(output)
 
         # Convert from our internal ESPA/ENVI format to HDF
-        elif input_format == 'envi' and output_format == 'hdf-eos':
+        elif input_format == 'envi' and output_format == 'hdf-eos2':
             # convert_espa_to_hdf
             hdf_name = metadata_filename.replace('.xml', '.hdf')
             # Call with deletion of source files
