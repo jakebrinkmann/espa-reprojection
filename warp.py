@@ -292,12 +292,12 @@ def build_warp_command(source_file, output_file, output_format='envi',
     if ((min_x is not None) and (min_y is not None)
             and (max_x is not None) and (max_y is not None)):
 
-        debug("Image Extents: %s, %s, %s, %s" % (min_x, min_y, max_x, max_y))
+        debug("Image Extents: %f, %f, %f, %f" % (min_x, min_y, max_x, max_y))
         cmd.extend(['-te', str(min_x), str(min_y), str(max_x), str(max_y)])
 
     # Resize the pixels
     if pixel_size is not None:
-        cmd.extend(['-tr', pixel_size, pixel_size])
+        cmd.extend(['-tr', str(pixel_size), str(pixel_size)])
 
     # Reproject the data
     if projection is not None:
