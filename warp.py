@@ -859,18 +859,17 @@ def warp_espa_data(parms, xml_filename=None):
     min_y = parms['miny']
     max_x = parms['maxx']
     max_y = parms['maxy']
-    pixel_size = parms['pixel_size']
     resample_method = parms['resample_method']
     datum = parms['datum']
 
     try:
         xml = metadata_api.parse(xml_filename, silence=True)
         bands = xml.get_bands()
+        global_metadata = xml.get_global_metadata()
+        satellite = global_metadata.get_satellite()
 
         # These will be poulated with the last bands information
         map_info_str = None
-        x_pixel_size = None
-        y_pixel_size = None
 
         ds_transform = None
         # Process through the bands in the XML file
@@ -878,6 +877,14 @@ def warp_espa_data(parms, xml_filename=None):
             img_filename = band.get_file_name()
             hdr_filename = img_filename.replace('.img', '.hdr')
             log("Processing %s" % img_filename)
+
+            # Figure out the pixel size to use
+            pixel_size = parms['pixel_size']
+
+            # EXECUTIVE DECISION(Calli) - ESPA Issue 185
+            #    - If the band is Landsat 7 Band 8 do not resize the pixels.
+            if satellite == 'LANDSAT_7' and band.get_name() == 'band8':
+                pixel_size = float(band.pixel_size.x)
 
             # Open the image to read the no data value out since the internal
             # ENVI driver for GDAL does not output it, even if it is known
