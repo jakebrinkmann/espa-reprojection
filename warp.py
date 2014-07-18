@@ -884,7 +884,10 @@ def warp_espa_data(parms, xml_filename=None):
             # EXECUTIVE DECISION(Calli) - ESPA Issue 185
             #    - If the band is Landsat 7 Band 8 do not resize the pixels.
             if satellite == 'LANDSAT_7' and band.get_name() == 'band8':
-                pixel_size = float(band.pixel_size.x)
+                if parms['target_projection'] == 'lonlat':
+                    pixel_size = parameters.DEG_FOR_15_METERS
+                else:
+                    pixel_size = float(band.pixel_size.x)
 
             # Open the image to read the no data value out since the internal
             # ENVI driver for GDAL does not output it, even if it is known
