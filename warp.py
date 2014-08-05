@@ -1123,6 +1123,23 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
                 if len(output) > 0:
                     log(output)
 
+            # Remove all the *.tfw files since gtiff was chosen a bunch may
+            # be present
+            files_to_remove = glob.glob('*.tfw')
+            if len(files_to_remove) > 0:
+                cmd = ' '.join(['rm', '-rf'] + files_to_remove)
+                log(' '.join(['REMOVING TFW DATA COMMAND:', cmd]))
+
+                output = ''
+                try:
+                    output = util.execute_cmd(cmd)
+                except Exception, e:
+                    raise ee.ESPAException(ee.ErrorCodes.reformat,
+                                           str(e)), None, sys.exc_info()[2]
+                finally:
+                    if len(output) > 0:
+                        log(output)
+
         # Convert from our internal ESPA/ENVI format to HDF
         elif input_format == 'envi' and output_format == 'hdf-eos2':
             # convert_espa_to_hdf
