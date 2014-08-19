@@ -37,6 +37,10 @@ import util
 # We are only supporting one radius
 SINUSOIDAL_SPHERE_RADIUS = 6371007.181
 
+# Some defines for common pixels sizes in decimal degrees
+DEG_FOR_30_METERS = 0.0002695
+DEG_FOR_15_METERS = DEG_FOR_30_METERS / 2.0
+
 # Supported datums - the strings for them
 WGS84 = 'WGS84'
 NAD27 = 'NAD27'
@@ -257,7 +261,7 @@ def build_argument_parser():
 
 
 # ============================================================================
-def validate_parameters(parms):
+def validate_parameters(parms, scene):
     '''
     Description:
       Make sure all the parameters needed for this and called routines
@@ -268,6 +272,7 @@ def validate_parameters(parms):
     global valid_ns, valid_datums
 
     parameters.validate_reprojection_parameters(parms,
+                                                scene,
                                                 valid_projections,
                                                 valid_ns,
                                                 valid_pixel_size_units,
@@ -826,7 +831,7 @@ def update_espa_xml(parms, xml, xml_filename, datum=WGS84):
 
 
 # ============================================================================
-def warp_espa_data(parms, xml_filename=None):
+def warp_espa_data(parms, scene, xml_filename=None):
     '''
     Description:
       Warp each espa science product to the parameters specified in the parms
@@ -835,7 +840,7 @@ def warp_espa_data(parms, xml_filename=None):
     global SINUSOIDAL_SPHERE_RADIUS
 
     # Validate the parameters
-    validate_parameters(parms)
+    validate_parameters(parms, scene)
     debug(parms)
 
     # Verify something was provided for the XML filename
@@ -885,7 +890,7 @@ def warp_espa_data(parms, xml_filename=None):
             #    - If the band is Landsat 7 Band 8 do not resize the pixels.
             if satellite == 'LANDSAT_7' and band.get_name() == 'band8':
                 if parms['target_projection'] == 'lonlat':
-                    pixel_size = parameters.DEG_FOR_15_METERS
+                    pixel_size = DEG_FOR_15_METERS
                 else:
                     pixel_size = float(band.pixel_size.x)
 
@@ -999,84 +1004,6 @@ def warp_espa_data(parms, xml_filename=None):
         # Change back to the previous directory
         os.chdir(current_directory)
 # END - warp_espa_data
-
-
-# ============================================================================
-def warp_science_products(parms, xml_filename=None):
-    '''
-    Description:
-      Warp each science product to the parameters specified in the parms
-    '''
-
-    # Validate the parameters
-    validate_parameters(parms)
-    debug(parms)
-
-    if parms['projection'] is not None:
-        # Use the provided proj.4 projection information
-        projection = parms['projection']
-    elif parms['reproject']:
-        # Verify and create proj.4 projection information
-        projection = convert_target_projection_to_proj4(parms)
-    else:
-        projection = None
-
-    # Change to the working directory
-    current_directory = os.getcwd()
-    os.chdir(parms['work_directory'])
-
-    min_x = parms['minx']
-    min_y = parms['miny']
-    max_x = parms['maxx']
-    max_y = parms['maxy']
-    pixel_size = parms['pixel_size']
-    resample_method = parms['resample_method']
-
-    try:
-        # First convert any HDF to GeoTIFF
-        what_to_convert = glob.glob('*.hdf')
-        for filename in what_to_convert:
-            log("Converting %s to GeoTIFF" % filename)
-            convert_hdf_to_gtiff(filename)
-
-        # Now warp the GeoTIFF files
-        what_to_warp = glob.glob('*.TIF')
-        what_to_warp.extend(glob.glob('*.tif'))  # capture the browse
-        output_format = 'gtiff'
-        for filename in what_to_warp:
-            log("Processing %s" % filename)
-
-            if "TIF" in filename:
-                output_filename = 'tmp-%s.tif' \
-                    % filename.split('.TIF')[0].lower()
-                no_data_value = '0'  # Assuming Landsat data
-            else:
-                output_filename = 'tmp-%s' % filename.lower()
-                no_data_value = get_no_data_value(filename)
-
-            run_warp(filename, output_filename, output_format,
-                     min_x, min_y, max_x, max_y,
-                     pixel_size, projection, resample_method, no_data_value)
-
-            # Remove the original file, it is not needed anymore
-            if os.path.exists(filename):
-                os.unlink(filename)
-
-            # Rename the temp file back to the original name
-            os.rename(output_filename, filename)
-        # END - for each file
-
-        # Now warp the ESPA files
-        if xml_filename is not None:
-            warp_espa_data(parms, xml_filename)
-
-    except Exception, e:
-        raise ee.ESPAException(ee.ErrorCodes.warping,
-                               str(e)), None, sys.exc_info()[2]
-    finally:
-        # Change back to the previous directory
-        os.chdir(current_directory)
-# END - warp_science_products
 
 
 # ============================================================================
@@ -1202,7 +1129,7 @@ if __name__ == '__main__':
 
     try:
         # Call the main processing routine
-        warp_science_products(options)
+        warp_espa_data(options, parms['scene'])
     except Exception, e:
         log("Error: %s" % str(e))
         tb = traceback.format_exc()
