@@ -1081,8 +1081,7 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
                 output = util.execute_cmd(cmd)
 
                 # Rename the XML file back to *.xml from *_hdf.xml
-                meta_hdf_name = metadata_filename.split('.')[0]
-                meta_hdf_name = ''.join([meta_hdf_name, '_hdf.xml'])
+                meta_hdf_name = metadata_filename.replace('.xml', '_hdf.xml')
 
                 os.rename(meta_hdf_name, metadata_filename)
             except Exception, e:
