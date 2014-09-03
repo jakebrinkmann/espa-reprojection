@@ -17,7 +17,6 @@ History:
 
 import os
 import sys
-import traceback
 import glob
 from cStringIO import StringIO
 from argparse import ArgumentParser
@@ -25,8 +24,13 @@ from osgeo import gdal, osr
 
 # espa-common objects and methods
 from espa_constants import *
-from espa_logging import log, set_debug, debug
 import metadata_api
+
+# imports from espa/espa_common
+try:
+    from espa_logging import EspaLogging
+except:
+    from espa_common.espa_logging import EspaLogging
 
 # local objects and methods
 import espa_exception as ee
@@ -291,13 +295,16 @@ def build_warp_command(source_file, output_file, output_format='envi',
       Builds the GDAL warp command to convert the data
     '''
 
+    logger = EspaLogging.get_logger('espa.processing')
+
     cmd = ['gdalwarp', '-wm', '2048', '-multi', '-of', output_format]
 
     # Subset the image using the specified extents
     if ((min_x is not None) and (min_y is not None)
             and (max_x is not None) and (max_y is not None)):
 
-        debug("Image Extents: %f, %f, %f, %f" % (min_x, min_y, max_x, max_y))
+        logger.debug("Image Extents: %f, %f, %f, %f"
+                     % (min_x, min_y, max_x, max_y))
         cmd.extend(['-te', str(min_x), str(min_y), str(max_x), str(max_y)])
 
     # Resize the pixels
@@ -384,6 +391,8 @@ def run_warp(source_file, output_file, output_format='envi',
       Executes the warping command on the specified source file
     '''
 
+    logger = EspaLogging.get_logger('espa.processing')
+
     try:
         # Turn GDAL PAM off to prevent *.aux.xml files
         os.environ['GDAL_PAM_ENABLED'] = 'NO'
@@ -391,12 +400,13 @@ def run_warp(source_file, output_file, output_format='envi',
         cmd = build_warp_command(source_file, output_file, output_format,
                                  min_x, min_y, max_x, max_y, pixel_size,
                                  projection, resample_method, no_data_value)
-        debug(cmd)
+        logger.debug(cmd)
         cmd = ' '.join(cmd)
 
-        log("Warping %s with %s" % (source_file, cmd))
+        logger.info("Warping %s with %s" % (source_file, cmd))
         output = util.execute_cmd(cmd)
-        log(output)
+        if len(output) > 0:
+            logger.info(output)
 
     except Exception, e:
         raise
@@ -465,15 +475,17 @@ def convert_hdf_to_gtiff(hdf_file):
         Convert HDF formatted data to GeoTIFF
     '''
 
+    logger = EspaLogging.get_logger('espa.processing')
+
     hdf_name = hdf_file.split('.hdf')[0]
     output_format = 'gtiff'
 
-    log("Retrieving global HDF metadata")
+    logger.info("Retrieving global HDF metadata")
     metadata = get_hdf_global_metadata(hdf_file)
     if metadata is not None and len(metadata) > 0:
         metadata_filename = '%s-global_metadata.txt' % hdf_name
 
-        log("Writing global metadata to %s" % metadata_filename)
+        logger.info("Writing global metadata to %s" % metadata_filename)
         with open(metadata_filename, 'w+') as metadata_fd:
             metadata_fd.write(str(metadata))
 
@@ -496,7 +508,7 @@ def convert_hdf_to_gtiff(hdf_file):
             sds_parts = sds_parts[len(sds_parts) - 1].split(')')
             hdf_type = sds_parts[0]
 
-            log("Processing Subdataset %s" % quoted_sds_name)
+            logger.info("Processing Subdataset %s" % quoted_sds_name)
 
             # Remove spaces from the subdataset name for the
             # final output name
@@ -545,12 +557,14 @@ def convert_imageXY_to_mapXY(image_x, image_y, transform):
 # ============================================================================
 def update_espa_xml(parms, xml, xml_filename, datum=WGS84):
 
+    logger = EspaLogging.get_logger('espa.processing')
+
     try:
         bands = xml.get_bands()
         for band in bands.band:
             img_filename = band.get_file_name()
             hdr_filename = img_filename.replace('.img', '.hdr')
-            log("Updating XML for %s" % img_filename)
+            logger.info("Updating XML for %s" % img_filename)
 
             ds = gdal.Open(img_filename)
             if ds is None:
@@ -636,7 +650,7 @@ def update_espa_xml(parms, xml, xml_filename, datum=WGS84):
         if projection_name is not None:
             # ----------------------------------------------------------------
             if projection_name.lower().startswith('transverse_mercator'):
-                log("---- Updating UTM Parameters")
+                logger.info("---- Updating UTM Parameters")
                 # Get the parameter values
                 zone = int(ds_srs.GetUTMZone())
                 # Get a new UTM projection parameter object and populate it
@@ -649,7 +663,7 @@ def update_espa_xml(parms, xml, xml_filename, datum=WGS84):
                 gm.projection_information.set_datum(WGS84)  # WGS84 only
             # ----------------------------------------------------------------
             elif projection_name.lower().startswith('polar'):
-                log("---- Updating Polar Stereographic Parameters")
+                logger.info("---- Updating Polar Stereographic Parameters")
                 # Get the parameter values
                 latitude_true_scale = ds_srs.GetProjParm('latitude_of_origin')
                 longitude_pole = ds_srs.GetProjParm('central_meridian')
@@ -668,7 +682,7 @@ def update_espa_xml(parms, xml, xml_filename, datum=WGS84):
                 gm.projection_information.set_datum(WGS84)  # WGS84 only
             # ----------------------------------------------------------------
             elif projection_name.lower().startswith('albers'):
-                log("---- Updating Albers Equal Area Parameters")
+                logger.info("---- Updating Albers Equal Area Parameters")
                 # Get the parameter values
                 standard_parallel1 = ds_srs.GetProjParm('standard_parallel_1')
                 standard_parallel2 = ds_srs.GetProjParm('standard_parallel_2')
@@ -694,7 +708,7 @@ def update_espa_xml(parms, xml, xml_filename, datum=WGS84):
                 gm.projection_information.set_datum(datum)
             # ----------------------------------------------------------------
             elif projection_name.lower().startswith('sinusoidal'):
-                log("---- Updating Sinusoidal Parameters")
+                logger.info("---- Updating Sinusoidal Parameters")
                 # Get the parameter values
                 central_meridian = ds_srs.GetProjParm('longitude_of_center')
                 false_easting = ds_srs.GetProjParm('false_easting')
@@ -715,7 +729,7 @@ def update_espa_xml(parms, xml, xml_filename, datum=WGS84):
         else:
             # ----------------------------------------------------------------
             # Must be Geographic Projection
-            log("---- Updating Geographic Parameters")
+            logger.info("---- Updating Geographic Parameters")
             gm.projection_information.set_projection('GEO')
             gm.projection_information.set_datum(WGS84)  # WGS84 only
             gm.projection_information.set_units('degrees')  # always degrees
@@ -811,7 +825,8 @@ def update_espa_xml(parms, xml, xml_filename, datum=WGS84):
         del (ds_srs)
 
         # Write out a new XML file after validation
-        log("---- Validating XML Modifications and Creating Temp Output File")
+        logger.info("---- Validating XML Modifications and"
+                    " Creating Temp Output File")
         tmp_xml_filename = 'tmp-%s' % xml_filename
         with open(tmp_xml_filename, 'w') as tmp_fd:
             # Call the export with validation
@@ -839,9 +854,11 @@ def warp_espa_data(parms, scene, xml_filename=None):
 
     global SINUSOIDAL_SPHERE_RADIUS
 
+    logger = EspaLogging.get_logger('espa.processing')
+
     # Validate the parameters
     validate_parameters(parms, scene)
-    debug(parms)
+    logger.debug(parms)
 
     # Verify something was provided for the XML filename
     if xml_filename is None or xml_filename == '':
@@ -881,7 +898,7 @@ def warp_espa_data(parms, scene, xml_filename=None):
         for band in bands.band:
             img_filename = band.get_file_name()
             hdr_filename = img_filename.replace('.img', '.hdr')
-            log("Processing %s" % img_filename)
+            logger.info("Processing %s" % img_filename)
 
             # Figure out the pixel size to use
             pixel_size = parms['pixel_size']
@@ -1017,6 +1034,8 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
           Output Formats: envi(espa), gtiff, and hdf
     '''
 
+    logger = EspaLogging.get_logger('espa.processing')
+
     # Don't do anything if they match
     if input_format == output_format:
         return
@@ -1048,14 +1067,14 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
                                        str(e)), None, sys.exc_info()[2]
             finally:
                 if len(output) > 0:
-                    log(output)
+                    logger.info(output)
 
             # Remove all the *.tfw files since gtiff was chosen a bunch may
             # be present
             files_to_remove = glob.glob('*.tfw')
             if len(files_to_remove) > 0:
                 cmd = ' '.join(['rm', '-rf'] + files_to_remove)
-                log(' '.join(['REMOVING TFW DATA COMMAND:', cmd]))
+                logger.info(' '.join(['REMOVING TFW DATA COMMAND:', cmd]))
 
                 output = ''
                 try:
@@ -1065,7 +1084,7 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
                                            str(e)), None, sys.exc_info()[2]
                 finally:
                     if len(output) > 0:
-                        log(output)
+                        logger.info(output)
 
         # Convert from our internal ESPA/ENVI format to HDF
         elif input_format == 'envi' and output_format == 'hdf-eos2':
@@ -1089,7 +1108,7 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
                                        str(e)), None, sys.exc_info()[2]
             finally:
                 if len(output) > 0:
-                    log(output)
+                    logger.info(output)
 
         # Requested conversion not implemented
         else:
@@ -1120,8 +1139,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args_dict = vars(parser.parse_args())
 
-    # Setup debug
-    set_debug(args.debug)
+    # Configure logging
+    EspaLogging.configure('espa.processing', order='test',
+                          product='product', debug=args.debug)
+    logger = EspaLogging.get_logger('espa.processing')
 
     # Build our JSON formatted input from the command line parameters
     options = {k: args_dict[k] for k in args_dict if args_dict[k] is not None}
@@ -1130,11 +1151,9 @@ if __name__ == '__main__':
         # Call the main processing routine
         warp_espa_data(options, parms['scene'])
     except Exception, e:
-        log("Error: %s" % str(e))
-        tb = traceback.format_exc()
-        log("Traceback: [%s]" % tb)
         if hasattr(e, 'output'):
-            log("Error: Output [%s]" % e.output)
+            logger.error("Output [%s]" % e.output)
+        logger.exception("Processing failed")
         sys.exit(EXIT_FAILURE)
 
     sys.exit(EXIT_SUCCESS)
