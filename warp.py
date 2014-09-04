@@ -32,6 +32,12 @@ try:
 except:
     from espa_common.espa_logging import EspaLogging
 
+try:
+    import utilities
+except:
+    from espa_common import utilities
+
+
 # local objects and methods
 import espa_exception as ee
 import parameters
@@ -338,7 +344,7 @@ def parse_hdf_subdatasets(hdf_file):
     '''
 
     cmd = ' '.join(['gdalinfo', hdf_file])
-    output = util.execute_cmd(cmd)
+    output = utilities.execute_cmd(cmd)
     name = ''
     description = ''
     for line in output.split('\n'):
@@ -368,7 +374,7 @@ def get_no_data_value(filename):
     '''
 
     cmd = ' '.join(['gdalinfo', filename])
-    output = util.execute_cmd(cmd)
+    output = utilities.execute_cmd(cmd)
 
     no_data_value = None
     for line in output.split('\n'):
@@ -404,7 +410,7 @@ def run_warp(source_file, output_file, output_format='envi',
         cmd = ' '.join(cmd)
 
         logger.info("Warping %s with %s" % (source_file, cmd))
-        output = util.execute_cmd(cmd)
+        output = utilities.execute_cmd(cmd)
         if len(output) > 0:
             logger.info(output)
 
@@ -427,7 +433,7 @@ def get_hdf_global_metadata(hdf_file):
     '''
 
     cmd = ' '.join(['gdalinfo', hdf_file])
-    output = util.execute_cmd(cmd)
+    output = utilities.execute_cmd(cmd)
 
     sb = StringIO()
     has_metadata = False
@@ -458,7 +464,7 @@ def hdf_has_subdatasets(hdf_file):
     '''
 
     cmd = ' '.join(['gdalinfo', hdf_file])
-    output = util.execute_cmd(cmd)
+    output = utilities.execute_cmd(cmd)
 
     for line in output.split('\n'):
         if str(line).strip().lower().startswith('subdatasets'):
@@ -1055,7 +1061,7 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
 
             output = ''
             try:
-                output = util.execute_cmd(cmd)
+                output = utilities.execute_cmd(cmd)
 
                 # Rename the XML file back to *.xml from *_gtif.xml
                 meta_gtiff_name = metadata_filename.split('.xml')[0]
@@ -1078,7 +1084,7 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
 
                 output = ''
                 try:
-                    output = util.execute_cmd(cmd)
+                    output = utilities.execute_cmd(cmd)
                 except Exception, e:
                     raise ee.ESPAException(ee.ErrorCodes.reformat,
                                            str(e)), None, sys.exc_info()[2]
@@ -1097,7 +1103,7 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
 
             output = ''
             try:
-                output = util.execute_cmd(cmd)
+                output = utilities.execute_cmd(cmd)
 
                 # Rename the XML file back to *.xml from *_hdf.xml
                 meta_hdf_name = metadata_filename.replace('.xml', '_hdf.xml')
