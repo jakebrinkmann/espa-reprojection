@@ -370,7 +370,7 @@ def parse_hdf_subdatasets(hdf_file):
 def get_no_data_value(filename):
     '''
     Description:
-      TODO TODO TODO
+      Returns the 'nodata value' associated with a georeferenced image.
     '''
 
     cmd = ' '.join(['gdalinfo', filename])
