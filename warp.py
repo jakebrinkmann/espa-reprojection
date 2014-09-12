@@ -60,6 +60,7 @@ NAD83 = 'NAD83'
 valid_resample_methods = ['near', 'bilinear', 'cubic', 'cubicspline',
                           'lanczos']
 valid_pixel_size_units = ['meters', 'dd']
+valid_image_extents_units = ['meters', 'dd']
 valid_projections = ['sinu', 'aea', 'utm', 'ps', 'lonlat']
 valid_ns = ['north', 'south']
 # First entry in the datums is used as the default, it should always be set to
@@ -247,9 +248,6 @@ def build_argument_parser():
       Build the command line argument parser.
     '''
 
-    global valid_resample_methods, valid_pixel_size_units, valid_projections
-    global valid_ns, valid_datums
-
     # Create a command line argument parser
     description = "Alters product extents, projections and pixel sizes"
     parser = ArgumentParser(description=description)
@@ -261,6 +259,7 @@ def build_argument_parser():
                                            valid_projections,
                                            valid_ns,
                                            valid_pixel_size_units,
+                                           valid_image_extents_units,
                                            valid_resample_methods,
                                            valid_datums)
 
@@ -278,14 +277,12 @@ def validate_parameters(parms, scene):
       is available with the provided input parameters.
     '''
 
-    global valid_resample_methods, valid_pixel_size_units, valid_projections
-    global valid_ns, valid_datums
-
     parameters.validate_reprojection_parameters(parms,
                                                 scene,
                                                 valid_projections,
                                                 valid_ns,
                                                 valid_pixel_size_units,
+                                                valid_image_extents_units,
                                                 valid_resample_methods,
                                                 valid_datums)
 # END - validate_parameters
@@ -523,8 +520,7 @@ def convert_hdf_to_gtiff(hdf_file):
 
             run_warp(quoted_sds_name, output_filename, output_format,
                      None, None, None, None,
-                     None, None, 'near',
-                     no_data_value)
+                     None, None, 'near', no_data_value)
 
     # We only have the one dataset in the HDF file
     else:
@@ -532,8 +528,8 @@ def convert_hdf_to_gtiff(hdf_file):
 
         no_data_value = get_no_data_value(hdf_file)
         run_warp(hdf_file, output_filename, output_format,
-                 min_x, min_y, max_x, max_y,
-                 pixel_size, projection, resample_method, no_data_value)
+                 None, None, None, None,
+                 None, None, 'near', no_data_value)
 
     # Remove the HDF file, it is not needed anymore
     if os.path.exists(hdf_file):
@@ -561,11 +557,16 @@ def convert_imageXY_to_mapXY(image_x, image_y, transform):
 
 
 # ============================================================================
-def update_espa_xml(parms, xml, xml_filename, datum=WGS84):
+def update_espa_xml(parms, xml, xml_filename):
 
     logger = EspaLogging.get_logger('espa.processing')
 
     try:
+        # Default the datum to WGS84
+        datum = WGS84
+        if parms['datum'] is not None:
+            datum = parms['datum']
+
         bands = xml.get_bands()
         for band in bands.band:
             img_filename = band.get_file_name()
@@ -852,13 +853,107 @@ def update_espa_xml(parms, xml, xml_filename, datum=WGS84):
 
 
 # ============================================================================
+def warp_to_geographic_with_subset(parms, i_filename=None, o_filename=None):
+    '''
+    Description:
+      Warp to the geographic projection with subsetting.
+
+    Notes:
+      We use the original pixel size of the data for this.
+    '''
+
+    geo_projection_string = build_geographic_proj4_string()
+
+    pixel_size = parms['data_pixel_size']
+    if parms['data_pixel_size_units'] == 'meters':
+        # Convert to degrees trying the defines ones first
+        if pixel_size == 15.0:
+            pixel_size = DEG_FOR_15_METERS
+        elif pixel_size == 30.0:
+            pixel_size = DEG_FOR_30_METERS
+        else:
+            pixel_size = (DEG_FOR_30_METERS / 30.0) * pixel_size
+
+    run_warp(i_filename, o_filename, output_format='envi',
+             min_x=parms['minx'],
+             min_y=parms['miny'],
+             max_x=parms['maxx'],
+             max_y=parms['maxy'],
+             pixel_size=pixel_size,
+             projection=geo_projection_string,
+             resample_method='near',
+             no_data_value=parms['target_no_data_value'])
+# END - warp_to_geographic_with_subset
+
+
+# ============================================================================
+def warp_to_target_without_subset(parms, i_filename=None, o_filename=None):
+
+    run_warp(i_filename, o_filename, output_format='envi',
+             min_x=None,
+             min_y=None,
+             max_x=None,
+             max_y=None,
+             pixel_size=parms['target_pixel_size'],
+             projection=parms['target_proj4_projection'],
+             resample_method=parms['resample_method'],
+             no_data_value=parms['target_no_data_value'])
+# END - warp_to_target_without_subset
+
+
+# ============================================================================
+def warp_to_target_with_subset(parms, i_filename=None, o_filename=None):
+
+    run_warp(i_filename, o_filename, output_format='envi',
+             min_x=parms['minx'],
+             min_y=parms['miny'],
+             max_x=parms['maxx'],
+             max_y=parms['maxy'],
+             pixel_size=parms['target_pixel_size'],
+             projection=parms['target_proj4_projection'],
+             resample_method=parms['resample_method'],
+             no_data_value=parms['target_no_data_value'])
+# END - warp_to_target_with_subset
+
+
+# ============================================================================
+def warp_image(parms, no_data_value=None,
+               i_filename=None, o_filename=None):
+    '''
+    Description:
+      Determine if the image needs to be warped to geographic first and then
+      warp it appropriately
+    '''
+
+    # Might need to warp to geographic first
+    target_projection = parms['target_projection']
+    if (parms['image_extents_units'] == 'dd'
+            and (target_projection is None or target_projection != 'lonlat')):
+
+        # We need an in-between filename
+        g_filename = 'geographic_warped.img'
+
+        if target_projection is None:
+            parms['target_proj4_projection'] = parms['data_proj4_projection']
+
+        warp_to_geographic_with_subset(parms, i_filename, g_filename)
+
+        warp_to_target_without_subset(parms, g_filename, o_filename)
+
+        # Remove the geographic temp file
+        if os.path.exists(g_filename):
+            os.unlink(g_filename)
+    else:
+        warp_to_target_with_subset(parms, i_filename, o_filename)
+# END - warp_image
+
+
+# ============================================================================
 def warp_espa_data(parms, scene, xml_filename=None):
     '''
     Description:
       Warp each espa science product to the parameters specified in the parms
     '''
-
-    global SINUSOIDAL_SPHERE_RADIUS
 
     logger = EspaLogging.get_logger('espa.processing')
 
@@ -870,25 +965,9 @@ def warp_espa_data(parms, scene, xml_filename=None):
     if xml_filename is None or xml_filename == '':
         raise ee.ESPAException(ee.ErrorCodes.warping, "Missing XML Filename")
 
-    if parms['projection'] is not None:
-        # Use the provided proj.4 projection information
-        projection = parms['projection']
-    elif parms['reproject']:
-        # Verify and create proj.4 projection information
-        projection = convert_target_projection_to_proj4(parms)
-    else:
-        projection = None
-
     # Change to the working directory
     current_directory = os.getcwd()
     os.chdir(parms['work_directory'])
-
-    min_x = parms['minx']
-    min_y = parms['miny']
-    max_x = parms['maxx']
-    max_y = parms['maxy']
-    resample_method = parms['resample_method']
-    datum = parms['datum']
 
     try:
         xml = metadata_api.parse(xml_filename, silence=True)
@@ -896,10 +975,22 @@ def warp_espa_data(parms, scene, xml_filename=None):
         global_metadata = xml.get_global_metadata()
         satellite = global_metadata.get_satellite()
 
+        # Get the proj4 projection string
+        if parms['projection'] is not None:
+            # Use the provided proj.4 projection string for the projection
+            target_proj4_projection = parms['projection']
+        elif parms['reproject']:
+            # Verify and create proj.4 projection string
+            target_proj4_projection = convert_target_projection_to_proj4(parms)
+        else:
+            # Default to the original
+            target_proj4_projection = get_original_projection()
+
+        parms['target_proj4_projection'] = target_proj4_projection
+
         # These will be poulated with the last bands information
         map_info_str = None
 
-        ds_transform = None
         # Process through the bands in the XML file
         for band in bands.band:
             img_filename = band.get_file_name()
@@ -917,14 +1008,22 @@ def warp_espa_data(parms, scene, xml_filename=None):
                 else:
                     pixel_size = float(band.pixel_size.x)
 
+            parms['data_pixel_size'] = float(band.pixel_size.x)
+            parms['data_pixel_size_units'] = band.pixel_size.units
+            parms['target_pixel_size'] = pixel_size
+
             # Open the image to read the no data value out since the internal
             # ENVI driver for GDAL does not output it, even if it is known
             ds = gdal.Open(img_filename)
             if ds is None:
                 raise RuntimeError("GDAL failed to open (%s)" % img_filename)
 
+            ds_band = None
+            ds_srs = None
             try:
                 ds_band = ds.GetRasterBand(1)
+                ds_srs = osr.SpatialReference()
+                ds_srs.ImportFromWkt(ds.GetProjection())
             except Exception, e:
                 raise ee.ESPAException(ee.ErrorCodes.warping,
                                        str(e)), None, sys.exc_info()[2]
@@ -939,37 +1038,25 @@ def warp_espa_data(parms, scene, xml_filename=None):
                 # Convert to an integer then string
                 no_data_value = str(int(no_data_value))
 
+            parms['target_no_data_value'] = no_data_value
+
+            # Save the source data's proj4 information
+            parms['data_proj4_projection'] = ds_srs.ExportToProj4()
+
             del (ds_band)
+            del (ds_srs)
             del (ds)
 
             tmp_img_filename = 'tmp-%s' % img_filename
             tmp_hdr_filename = 'tmp-%s' % hdr_filename
 
-            run_warp(img_filename, tmp_img_filename, 'envi',
-                     min_x, min_y, max_x, max_y,
-                     pixel_size, projection, resample_method, no_data_value)
+            warp_image(parms, no_data_value, img_filename, tmp_img_filename)
 
             ##################################################################
             ##################################################################
             # Get new everything for the re-projected band
             ##################################################################
             ##################################################################
-            ds = gdal.Open(tmp_img_filename)
-            if ds is None:
-                msg = "GDAL failed to open (%s)" % tmp_img_filename
-                raise RuntimeError(msg)
-
-            try:
-                ds_band = ds.GetRasterBand(1)
-                ds_transform = ds.GetGeoTransform()
-                ds_srs = osr.SpatialReference()
-                ds_srs.ImportFromWkt(ds.GetProjection())
-            except Exception, e:
-                raise ee.ESPAException(ee.ErrorCodes.warping,
-                                       str(e)), None, sys.exc_info()[2]
-
-            del (ds_band)
-            del (ds)
 
             # Update the tmp ENVI header with our own values for some fields
             sb = StringIO()
@@ -1016,7 +1103,7 @@ def warp_espa_data(parms, scene, xml_filename=None):
         # END for each band in the XML file
 
         # Update the XML to reflect the new warped output
-        update_espa_xml(parms, xml, xml_filename, datum)
+        update_espa_xml(parms, xml, xml_filename)
 
         del (xml)
 
