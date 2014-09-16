@@ -940,9 +940,11 @@ def warp_image(parms, no_data_value=None,
 
         warp_to_target_without_subset(parms, g_filename, o_filename)
 
-        # Remove the geographic temp file
-        if os.path.exists(g_filename):
-            os.unlink(g_filename)
+        # Remove the .img
+        os.unlink(g_filename)
+        # Remove the .hdr
+        hdr_filename = g_filename.replace('img', 'hdr')
+        os.unlink(hdr_filename)
     else:
         warp_to_target_with_subset(parms, i_filename, o_filename)
 # END - warp_image
