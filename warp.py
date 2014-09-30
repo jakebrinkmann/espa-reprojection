@@ -28,9 +28,9 @@ import metadata_api
 
 # imports from espa/espa_common
 try:
-    from espa_logging import EspaLogging
+    from logger_factory import EspaLogging
 except:
-    from espa_common.espa_logging import EspaLogging
+    from espa_common.logger_factory import EspaLogging
 
 try:
     import utilities
@@ -950,6 +950,24 @@ def warp_image(parms, no_data_value=None,
 # END - warp_image
 
 
+def get_original_projection(img_filename):
+
+    ds = gdal.Open(img_filename)
+    if ds is None:
+        raise RuntimeError("GDAL failed to open (%s)" % img_filename)
+
+    ds_srs = osr.SpatialReference()
+    ds_srs.ImportFromWkt(ds.GetProjection())
+
+    proj4 = ds_srs.ExportToProj4()
+
+    del (ds_srs)
+    del (ds)
+
+    return proj4
+# END - get_original_projection
+
+
 # ============================================================================
 def warp_espa_data(parms, scene, xml_filename=None):
     '''
@@ -962,6 +980,16 @@ def warp_espa_data(parms, scene, xml_filename=None):
     # Validate the parameters
     validate_parameters(parms, scene)
     logger.debug(parms)
+
+    # ------------------------------------------------------------------------
+    # De-register the DOQ drivers since they may cause a problem with some of
+    # our generated imagery.  And we are only processing envi format today
+    # inside the processing code.
+    doq1 = gdal.GetDriverByName('DOQ1')
+    doq2 = gdal.GetDriverByName('DOQ2')
+    doq1.Deregister()
+    doq2.Deregister()
+    # ------------------------------------------------------------------------
 
     # Verify something was provided for the XML filename
     if xml_filename is None or xml_filename == '':
@@ -985,8 +1013,10 @@ def warp_espa_data(parms, scene, xml_filename=None):
             # Verify and create proj.4 projection string
             target_proj4_projection = convert_target_projection_to_proj4(parms)
         else:
-            # Default to the original
-            target_proj4_projection = get_original_projection()
+            # Default to the original using the first band
+            # Must have single quotes for gdalwarp to work
+            target_proj4_projection = "'%s'" \
+                % get_original_projection(bands.band[0].get_file_name())
 
         parms['target_proj4_projection'] = target_proj4_projection
 
