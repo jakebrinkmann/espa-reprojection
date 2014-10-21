@@ -40,7 +40,6 @@ except:
 # local objects and methods
 import espa_exception as ee
 import parameters
-import util
 
 
 # We are only supporting one radius
