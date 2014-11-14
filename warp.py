@@ -442,10 +442,6 @@ def build_base_warp_command(parms, output_format='envi', original_proj4=None):
         # must be quoted with single quotes
         cmd.extend(['-t_srs', "'%s'" % target_proj4])
 
-    # Specify the resampling method
-    if parms['resample_method'] is not None:
-        cmd.extend(['-r', parms['resample_method']])
-
     return cmd
 # END - build_base_warp_command
 
@@ -453,6 +449,7 @@ def build_base_warp_command(parms, output_format='envi', original_proj4=None):
 # ============================================================================
 def warp_image(source_file, output_file,
                base_warp_command=None,
+               resample_method='near',
                pixel_size=None,
                no_data_value=None):
     '''
@@ -467,6 +464,9 @@ def warp_image(source_file, output_file,
         os.environ['GDAL_PAM_ENABLED'] = 'NO'
 
         cmd = copy.deepcopy(base_warp_command)
+
+        # Resample method to use
+        cmd.extend(['-r', resample_method])
 
         # Resize the pixels
         if pixel_size is not None:
@@ -875,6 +875,14 @@ def warp_espa_data(parms, scene, xml_filename=None):
             hdr_filename = img_filename.replace('.img', '.hdr')
             logger.info("Processing %s" % img_filename)
 
+            # Use near for non-image bands and the user supplied resampling
+            # method for the image bands.
+            resample_method = 'near'
+            category = band.get_category()
+            if category == 'image':
+                if parms['resample_method'] is not None:
+                    resample_method = parms['resample_method']
+
             # Figure out the pixel size to use
             pixel_size = parms['pixel_size']
 
@@ -918,6 +926,7 @@ def warp_espa_data(parms, scene, xml_filename=None):
 
             warp_image(img_filename, tmp_img_filename,
                        base_warp_command=base_warp_command,
+                       resample_method=resample_method,
                        pixel_size=pixel_size,
                        no_data_value=no_data_value)
 
