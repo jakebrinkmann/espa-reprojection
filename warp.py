@@ -561,6 +561,10 @@ def update_espa_xml(parms, xml, xml_filename):
             band_pixel_size.set_x(x_pixel_size)
             band_pixel_size.set_y(y_pixel_size)
 
+            # For sanity report the resample method applied to the data
+            resample_method = band.get_resample_method()
+            logger.info("RESAMPLE METHOD [%s]" % resample_method)
+
             # We only support one unit type for each projection
             if projection_name is not None:
                 if projection_name.lower().startswith('transverse_mercator'):
@@ -869,19 +873,33 @@ def warp_espa_data(parms, scene, xml_filename=None):
         base_warp_command = \
             build_base_warp_command(parms, original_proj4=str(original_proj4))
 
+        # Determine the user specified resample method
+        user_resample_method = 'near'  # default
+        if parms['resample_method'] is not None:
+            user_resample_method = parms['resample_method']
+
         # Process through the bands in the XML file
         for band in bands.band:
             img_filename = band.get_file_name()
             hdr_filename = img_filename.replace('.img', '.hdr')
             logger.info("Processing %s" % img_filename)
 
-            # Use near for non-image bands and the user supplied resampling
-            # method for the image bands.
-            resample_method = 'near'
+            # Reset the resample method to the user specified value
+            resample_method = user_resample_method
+
+            # Always use near for qa bands
             category = band.get_category()
-            if category == 'image':
-                if parms['resample_method'] is not None:
-                    resample_method = parms['resample_method']
+            if category == 'qa':
+                resample_method = 'near'  # over-ride with 'near'
+
+            # Update the XML metadata object for the resampling method used
+            # Later update_espa_xml is used to update the XML file
+            if resample_method == 'near':
+                band.set_resample_method('nearest neighbor')
+            if resample_method == 'bilinear':
+                band.set_resample_method('bilinear')
+            if resample_method == 'cubic':
+                band.set_resample_method('cubic convolution')
 
             # Figure out the pixel size to use
             pixel_size = parms['pixel_size']
@@ -910,9 +928,7 @@ def warp_espa_data(parms, scene, xml_filename=None):
             # Save the no data value since gdalwarp does not write it out when
             # using the ENVI format
             no_data_value = ds_band.GetNoDataValue()
-            if no_data_value is None:
-                raise RuntimeError("no_data_value = None")
-            else:
+            if no_data_value is not None:
                 # TODO - We don't process any floating point data types.  Yet
                 # Convert to an integer then string
                 no_data_value = str(int(no_data_value))
@@ -945,13 +961,13 @@ def warp_espa_data(parms, scene, xml_filename=None):
                         break
                     if (line.startswith('data ignore value')
                             or line.startswith('description')):
-                        dummy = 'Nothing'
+                        pass
                     else:
                         sb.write(line)
 
                     if line.startswith('description'):
                         # This may be on multiple lines so read lines until
-                        # found
+                        # we find the closing brace
                         if not line.strip().endswith('}'):
                             while 1:
                                 next_line = tmp_fd.readline()
@@ -959,7 +975,8 @@ def warp_espa_data(parms, scene, xml_filename=None):
                                         or next_line.strip().endswith('}')):
                                     break
                         sb.write('description = {ESPA-generated file}\n')
-                    elif line.startswith('data type'):
+                    elif (line.startswith('data type')
+                          and (no_data_value is not None)):
                         sb.write('data ignore value = %s\n' % no_data_value)
             # END - with tmp_fd
 
