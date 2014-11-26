@@ -24,41 +24,19 @@ from osgeo import gdal, osr
 import numpy as np
 
 # espa-common objects and methods
-from espa_constants import *
+from espa_constants import EXIT_FAILURE
+from espa_constants import EXIT_SUCCESS
 import metadata_api
 
-# imports from espa/espa_common
-try:
-    from logger_factory import EspaLogging
-except:
-    from espa_common.logger_factory import EspaLogging
-
-try:
-    import utilities
-except:
-    from espa_common import utilities
-
+# imports from espa_common through processing.__init__.py
+from processing import EspaLogging
+from processing import settings
+from processing import utilities
 
 # local objects and methods
 import espa_exception as ee
 import parameters
 
-
-# We are only supporting one radius
-SINUSOIDAL_SPHERE_RADIUS = 6371007.181
-
-# Some defines for common pixels sizes in decimal degrees
-DEG_FOR_30_METERS = 0.0002695
-DEG_FOR_15_METERS = (DEG_FOR_30_METERS / 2.0)
-DEG_FOR_1_METER = (DEG_FOR_30_METERS / 30.0)
-
-# Supported datums - the strings for them
-WGS84 = 'WGS84'
-NAD27 = 'NAD27'
-NAD83 = 'NAD83'
-
-# We do not allow any user selectable choices for this projection
-GEOGRAPHIC_PROJ4_STRING = "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
 
 # These contain valid warping options
 valid_resample_methods = ['near', 'bilinear', 'cubic', 'cubicspline',
@@ -69,7 +47,7 @@ valid_projections = ['sinu', 'aea', 'utm', 'ps', 'lonlat']
 valid_ns = ['north', 'south']
 # First entry in the datums is used as the default, it should always be set to
 # WGS84
-valid_datums = [WGS84, NAD27, NAD83]
+valid_datums = [settings.WGS84, settings.NAD27, settings.NAD83]
 
 
 # ============================================================================
@@ -134,7 +112,8 @@ def build_sinu_proj4_string(central_meridian, false_easting, false_northing):
     proj4_string = ("+proj=sinu +lon_0=%f +x_0=%f +y_0=%f +a=%f +b=%f"
                     " +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
                     % (central_meridian, false_easting, false_northing,
-                       SINUSOIDAL_SPHERE_RADIUS, SINUSOIDAL_SPHERE_RADIUS))
+                       settings.SINUSOIDAL_SPHERE_RADIUS,
+                       settings.SINUSOIDAL_SPHERE_RADIUS))
 
     return proj4_string
 # END - build_sinu_proj4_string
@@ -268,7 +247,7 @@ def convert_target_projection_to_proj4(parms):
                                            parms['false_northing'])
 
     elif target_projection == "lonlat":
-        projection = GEOGRAPHIC_PROJ4_STRING
+        projection = settings.GEOGRAPHIC_PROJ4_STRING
 
     return str(projection)
 # END - convert_target_projection_to_proj4
@@ -297,12 +276,12 @@ def projection_minbox(ul_lon, ul_lat, lr_lon, lr_lat,
         (min_x, min_y, max_x, max_y) in meters
     '''
 
-    logger = EspaLogging.get_logger('espa.processing')
+    logger = EspaLogging.get_logger(settings.PROCESSING_LOGGER)
 
     logger.info("Determining Image Extents For Requested Projection")
 
     # We are always going to be geographic
-    source_proj4 = GEOGRAPHIC_PROJ4_STRING
+    source_proj4 = settings.GEOGRAPHIC_PROJ4_STRING
 
     logger.info("Using source projection [%s]" % source_proj4)
     logger.info("Using target projection [%s]" % target_proj4)
@@ -322,7 +301,7 @@ def projection_minbox(ul_lon, ul_lat, lr_lon, lr_lat,
     step = pixel_size
     if pixel_size_units == 'meters':
         # Convert it to decimal degrees
-        step = DEG_FOR_1_METER * pixel_size
+        step = settings.DEG_FOR_1_METER * pixel_size
 
     # Determine the lat and lon values to iterate over
     longitudes = np.arange(ul_lon, lr_lon, step, np.float)
@@ -457,7 +436,7 @@ def warp_image(source_file, output_file,
       Executes the warping command on the specified source file
     '''
 
-    logger = EspaLogging.get_logger('espa.processing')
+    logger = EspaLogging.get_logger(settings.PROCESSING_LOGGER)
 
     try:
         # Turn GDAL PAM off to prevent *.aux.xml files
@@ -487,7 +466,7 @@ def warp_image(source_file, output_file,
         if len(output) > 0:
             logger.info(output)
 
-    except Exception, e:
+    except Exception:
         raise
 
     finally:
@@ -513,18 +492,17 @@ def convert_imageXY_to_mapXY(image_x, image_y, transform):
 # ============================================================================
 def update_espa_xml(parms, xml, xml_filename):
 
-    logger = EspaLogging.get_logger('espa.processing')
+    logger = EspaLogging.get_logger(settings.PROCESSING_LOGGER)
 
     try:
         # Default the datum to WGS84
-        datum = WGS84
+        datum = settings.WGS84
         if parms['datum'] is not None:
             datum = parms['datum']
 
         bands = xml.get_bands()
         for band in bands.band:
             img_filename = band.get_file_name()
-            hdr_filename = img_filename.replace('.img', '.hdr')
             logger.info("Updating XML for %s" % img_filename)
 
             ds = gdal.Open(img_filename)
@@ -625,7 +603,7 @@ def update_espa_xml(parms, xml, xml_filename):
                 gm.projection_information.set_utm_proj_params(utm_projection)
                 # Update the attribute values
                 gm.projection_information.set_projection("UTM")
-                gm.projection_information.set_datum(WGS84)  # WGS84 only
+                gm.projection_information.set_datum(settings.WGS84)
             # ----------------------------------------------------------------
             elif projection_name.lower().startswith('polar'):
                 logger.info("---- Updating Polar Stereographic Parameters")
@@ -644,7 +622,7 @@ def update_espa_xml(parms, xml, xml_filename):
                 gm.projection_information.set_ps_proj_params(ps_projection)
                 # Update the attribute values
                 gm.projection_information.set_projection("PS")
-                gm.projection_information.set_datum(WGS84)  # WGS84 only
+                gm.projection_information.set_datum(settings.WGS84)
             # ----------------------------------------------------------------
             elif projection_name.lower().startswith('albers'):
                 logger.info("---- Updating Albers Equal Area Parameters")
@@ -680,7 +658,8 @@ def update_espa_xml(parms, xml, xml_filename):
                 false_northing = ds_srs.GetProjParm('false_northing')
                 # Get a new SIN projection parameter object and populate it
                 sin_projection = metadata_api.sin_proj_params()
-                sin_projection.set_sphere_radius(SINUSOIDAL_SPHERE_RADIUS)
+                sin_projection.set_sphere_radius(
+                    settings.SINUSOIDAL_SPHERE_RADIUS)
                 sin_projection.set_central_meridian(central_meridian)
                 sin_projection.set_false_easting(false_easting)
                 sin_projection.set_false_northing(false_northing)
@@ -696,7 +675,7 @@ def update_espa_xml(parms, xml, xml_filename):
             # Must be Geographic Projection
             logger.info("---- Updating Geographic Parameters")
             gm.projection_information.set_projection('GEO')
-            gm.projection_information.set_datum(WGS84)  # WGS84 only
+            gm.projection_information.set_datum(settings.WGS84)  # WGS84 only
             gm.projection_information.set_units('degrees')  # always degrees
 
         # Fix the UL and LR center of pixel map coordinates
@@ -836,7 +815,7 @@ def warp_espa_data(parms, scene, xml_filename=None):
       Warp each espa science product to the parameters specified in the parms
     '''
 
-    logger = EspaLogging.get_logger('espa.processing')
+    logger = EspaLogging.get_logger(settings.PROCESSING_LOGGER)
 
     # Validate the parameters
     validate_parameters(parms, scene)
@@ -908,7 +887,7 @@ def warp_espa_data(parms, scene, xml_filename=None):
             #    - If the band is Landsat 7 Band 8 do not resize the pixels.
             if satellite == 'LANDSAT_7' and band.get_name() == 'band8':
                 if parms['target_projection'] == 'lonlat':
-                    pixel_size = DEG_FOR_15_METERS
+                    pixel_size = settings.DEG_FOR_15_METERS
                 else:
                     pixel_size = float(band.pixel_size.x)
 
@@ -1020,7 +999,7 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
           Output Formats: envi(espa), gtiff, and hdf
     '''
 
-    logger = EspaLogging.get_logger('espa.processing')
+    logger = EspaLogging.get_logger(settings.PROCESSING_LOGGER)
 
     # Don't do anything if they match
     if input_format == output_format:
@@ -1126,9 +1105,9 @@ if __name__ == '__main__':
     args_dict = vars(parser.parse_args())
 
     # Configure logging
-    EspaLogging.configure('espa.processing', order='test',
+    EspaLogging.configure(settings.PROCESSING_LOGGER, order='test',
                           product='product', debug=args.debug)
-    logger = EspaLogging.get_logger('espa.processing')
+    logger = EspaLogging.get_logger(settings.PROCESSING_LOGGER)
 
     # Build our JSON formatted input from the command line parameters
     options = {k: args_dict[k] for k in args_dict if args_dict[k] is not None}
