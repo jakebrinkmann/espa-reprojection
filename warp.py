@@ -884,8 +884,10 @@ def warp_espa_data(parms, scene, xml_filename=None):
             pixel_size = parms['pixel_size']
 
             # EXECUTIVE DECISION(Calli) - ESPA Issue 185
-            #    - If the band is Landsat 7 Band 8 do not resize the pixels.
-            if satellite == 'LANDSAT_7' and band.get_name() == 'band8':
+            #    - If the band is (Landsat 7 or 8) and Band 8 do not resize
+            #      the pixels.
+            if ((satellite == 'LANDSAT_7' or satellite == 'LANDSAT_8')
+                    and band.get_name() == 'band8'):
                 if parms['target_projection'] == 'lonlat':
                     pixel_size = settings.DEG_FOR_15_METERS
                 else:
