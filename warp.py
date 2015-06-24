@@ -148,28 +148,24 @@ def build_utm_proj4_string(utm_zone, utm_north_south):
     Description:
       Builds a proj.4 string for utm
 
+    Note:
+      The ellipsoid probably doesn't need to be specified.
+
     Examples:
+      #### gdalsrsinfo EPSG:32660
       +proj=utm +zone=60 +ellps=WGS84 +datum=WGS84 +units=m +no_defs
 
-      +proj=utm +zone=39 +south +ellps=WGS72 +towgs84=0,0,1.9,0,0,0.814,-0.38
-      +units=m +no_defs
+      #### gdalsrsinfo EPSG:32739
+      +proj=utm +zone=39 +south +ellps=WGS84 +datum=WGS84 +units=m +no_defs
     '''
-    # TODO - Found this example on the web for south (39), that
-    # TODO - specifies the datum instead of "towgs"
-    # TODO - gdalsrsinfo EPSG:32739
-    # TODO - +proj=utm +zone=39 +south +datum=WGS84 +units=m +no_defs
-    # TODO - It also seems that northern doesn't need the ellipsoid either
-    # TODO - gdalsrsinfo EPSG:32660
-    # TODO - +proj=utm +zone=60 +datum=WGS84 +units=m +no_defs
 
     proj4_string = ''
     if str(utm_north_south).lower() == 'north':
         proj4_string = ("+proj=utm +zone=%i +ellps=WGS84 +datum=WGS84"
                         " +units=m +no_defs" % utm_zone)
     elif str(utm_north_south).lower() == 'south':
-        proj4_string = ("+proj=utm +zone=%i +south +ellps=WGS72"
-                        " +towgs84=0,0,1.9,0,0,0.814,-0.38 +units=m +no_defs"
-                        % utm_zone)
+        proj4_string = ("+proj=utm +zone=%i +south +ellps=WGS84 +datum=WGS84"
+                        " +units=m +no_defs" % utm_zone)
     else:
         raise ValueError("Invalid utm_north_south argument[%s]"
                          " Argument must be one of 'north' or 'south'"
