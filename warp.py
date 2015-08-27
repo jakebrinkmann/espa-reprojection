@@ -372,8 +372,8 @@ def build_image_extents_string(parms, target_proj4):
     target_projection = parms['target_projection']
 
     # Get the image extents string
-    if (parms['image_extents_units'] == 'dd'
-            and (target_projection is None or target_projection != 'lonlat')):
+    if (parms['image_extents_units'] == 'dd' and
+            (target_projection is None or target_projection != 'lonlat')):
 
         (min_x, min_y, max_x, max_y) = \
             projection_minbox(parms['minx'], parms['maxy'],
@@ -882,8 +882,8 @@ def warp_espa_data(parms, scene, xml_filename=None):
             # EXECUTIVE DECISION(Calli) - ESPA Issue 185
             #    - If the band is (Landsat 7 or 8) and Band 8 do not resize
             #      the pixels.
-            if ((satellite == 'LANDSAT_7' or satellite == 'LANDSAT_8')
-                    and band.get_name() == 'band8'):
+            if ((satellite == 'LANDSAT_7' or satellite == 'LANDSAT_8') and
+                    band.get_name() == 'band8'):
                 if parms['target_projection'] == 'lonlat':
                     pixel_size = settings.DEG_FOR_15_METERS
                 else:
@@ -936,8 +936,8 @@ def warp_espa_data(parms, scene, xml_filename=None):
                     line = tmp_fd.readline()
                     if not line:
                         break
-                    if (line.startswith('data ignore value')
-                            or line.startswith('description')):
+                    if (line.startswith('data ignore value') or
+                            line.startswith('description')):
                         pass
                     else:
                         sb.write(line)
@@ -948,12 +948,12 @@ def warp_espa_data(parms, scene, xml_filename=None):
                         if not line.strip().endswith('}'):
                             while 1:
                                 next_line = tmp_fd.readline()
-                                if (not next_line
-                                        or next_line.strip().endswith('}')):
+                                if (not next_line or
+                                        next_line.strip().endswith('}')):
                                     break
                         sb.write('description = {ESPA-generated file}\n')
-                    elif (line.startswith('data type')
-                          and (no_data_value is not None)):
+                    elif (line.startswith('data type') and
+                          (no_data_value is not None)):
                         sb.write('data ignore value = %s\n' % no_data_value)
             # END - with tmp_fd
 
