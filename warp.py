@@ -342,9 +342,9 @@ def projection_minbox(ul_lon, ul_lat, lr_lon, lr_lat,
         min_y = min(ry, ly, min_y)
         max_y = max(ry, ly, max_y)
 
-    del(transform)
-    del(source_srs)
-    del(target_srs)
+    del transform
+    del source_srs
+    del target_srs
 
     logger.info('Map coordinates after minbox determination')
     logger.info(','.join(['min_x', 'min_y', 'max_x', 'max_y']))
@@ -525,8 +525,8 @@ def update_espa_xml(parms, xml, xml_filename):
             x_pixel_size = abs(ds_transform[1])
             y_pixel_size = abs(ds_transform[5])
 
-            del (ds_band)
-            del (ds)
+            del ds_band
+            del ds
 
             # Update the band information in the XML file
             band.set_nlines(number_of_lines)
@@ -761,8 +761,8 @@ def update_espa_xml(parms, xml, xml_filename):
         bounding_coords.set_north(north_lat)
         bounding_coords.set_south(south_lat)
 
-        del (ds_transform)
-        del (ds_srs)
+        del ds_transform
+        del ds_srs
 
         # Write out a new XML file after validation
         logger.info("---- Validating XML Modifications and"
@@ -797,8 +797,8 @@ def get_original_projection(img_filename):
 
     proj4 = ds_srs.ExportToProj4()
 
-    del (ds_srs)
-    del (ds)
+    del ds_srs
+    del ds
 
     return proj4
 # END - get_original_projection
@@ -911,8 +911,8 @@ def warp_espa_data(parms, scene, xml_filename=None):
                 no_data_value = str(int(no_data_value))
 
             # Force a freeing of the memory
-            del (ds_band)
-            del (ds)
+            del ds_band
+            del ds
 
             tmp_img_filename = 'tmp-%s' % img_filename
             tmp_hdr_filename = 'tmp-%s' % hdr_filename
@@ -975,7 +975,7 @@ def warp_espa_data(parms, scene, xml_filename=None):
         # Update the XML to reflect the new warped output
         update_espa_xml(parms, xml, xml_filename)
 
-        del (xml)
+        del xml
 
     except Exception, e:
         raise ee.ESPAException(ee.ErrorCodes.warping,
