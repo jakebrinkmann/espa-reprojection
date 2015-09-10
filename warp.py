@@ -24,8 +24,6 @@ from osgeo import gdal, osr
 import numpy as np
 
 # espa-common objects and methods
-from espa_constants import EXIT_FAILURE
-from espa_constants import EXIT_SUCCESS
 import metadata_api
 
 # imports from espa_common
@@ -496,9 +494,9 @@ def update_espa_xml(parms, xml, xml_filename):
                 ds_transform = ds.GetGeoTransform()
                 ds_srs = osr.SpatialReference()
                 ds_srs.ImportFromWkt(ds.GetProjection())
-            except Exception, e:
+            except Exception as excep:
                 raise ee.ESPAException(ee.ErrorCodes.warping,
-                                       str(e)), None, sys.exc_info()[2]
+                                       str(excep)), None, sys.exc_info()[2]
 
             projection_name = ds_srs.GetAttrValue('PROJECTION')
 
@@ -764,9 +762,9 @@ def update_espa_xml(parms, xml, xml_filename):
         # Rename the temp file back to the original name
         os.rename(tmp_xml_filename, xml_filename)
 
-    except Exception, e:
+    except Exception as excep:
         raise ee.ESPAException(ee.ErrorCodes.warping,
-                               str(e)), None, sys.exc_info()[2]
+                               str(excep)), None, sys.exc_info()[2]
 
 
 # ============================================================================
@@ -881,9 +879,9 @@ def warp_espa_data(parms, scene, xml_filename=None):
             ds_band = None
             try:
                 ds_band = ds.GetRasterBand(1)
-            except Exception, e:
+            except Exception as excep:
                 raise ee.ESPAException(ee.ErrorCodes.warping,
-                                       str(e)), None, sys.exc_info()[2]
+                                       str(excep)), None, sys.exc_info()[2]
 
             # Save the no data value since gdalwarp does not write it out when
             # using the ENVI format
@@ -960,9 +958,9 @@ def warp_espa_data(parms, scene, xml_filename=None):
 
         del xml
 
-    except Exception, e:
+    except Exception as excep:
         raise ee.ESPAException(ee.ErrorCodes.warping,
-                               str(e)), None, sys.exc_info()[2]
+                               str(excep)), None, sys.exc_info()[2]
     finally:
         # Change back to the previous directory
         os.chdir(current_directory)
@@ -1007,9 +1005,9 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
                 meta_gtiff_name = ''.join([meta_gtiff_name, '_gtif.xml'])
 
                 os.rename(meta_gtiff_name, metadata_filename)
-            except Exception, e:
+            except Exception as excep:
                 raise ee.ESPAException(ee.ErrorCodes.reformat,
-                                       str(e)), None, sys.exc_info()[2]
+                                       str(excep)), None, sys.exc_info()[2]
             finally:
                 if len(output) > 0:
                     logger.info(output)
@@ -1024,9 +1022,9 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
                 output = ''
                 try:
                     output = utilities.execute_cmd(cmd)
-                except Exception, e:
+                except Exception as excep:
                     raise ee.ESPAException(ee.ErrorCodes.reformat,
-                                           str(e)), None, sys.exc_info()[2]
+                                           str(excep)), None, sys.exc_info()[2]
                 finally:
                     if len(output) > 0:
                         logger.info(output)
@@ -1048,9 +1046,9 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
                 meta_hdf_name = metadata_filename.replace('.xml', '_hdf.xml')
 
                 os.rename(meta_hdf_name, metadata_filename)
-            except Exception, e:
+            except Exception as excep:
                 raise ee.ESPAException(ee.ErrorCodes.reformat,
-                                       str(e)), None, sys.exc_info()[2]
+                                       str(excep)), None, sys.exc_info()[2]
             finally:
                 if len(output) > 0:
                     logger.info(output)
@@ -1060,9 +1058,9 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
             raise ValueError("Unsupported reformat combination (%s, %s)"
                              % (input_format, output_format))
 
-    except Exception, e:
+    except Exception as excep:
         raise ee.ESPAException(ee.ErrorCodes.reformat,
-                               str(e)), None, sys.exc_info()[2]
+                               str(excep)), None, sys.exc_info()[2]
     finally:
         # Change back to the previous directory
         os.chdir(current_directory)
@@ -1094,10 +1092,10 @@ if __name__ == '__main__':
     try:
         # Call the main processing routine
         warp_espa_data(options, parms['scene'])
-    except Exception, e:
-        if hasattr(e, 'output'):
+    except Exception as excep:
+        if hasattr(excep, 'output'):
             logger.error("Output [%s]" % e.output)
         logger.exception("Processing failed")
-        sys.exit(EXIT_FAILURE)
+        sys.exit(1)
 
-    sys.exit(EXIT_SUCCESS)
+    sys.exit(0)
