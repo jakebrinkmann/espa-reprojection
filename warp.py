@@ -45,9 +45,6 @@ valid_pixel_size_units = ['meters', 'dd']
 valid_image_extents_units = ['meters', 'dd']
 valid_projections = ['sinu', 'aea', 'utm', 'ps', 'lonlat']
 valid_ns = ['north', 'south']
-# First entry in the datums is used as the default, it should always be set to
-# WGS84
-valid_datums = [settings.WGS84, settings.NAD27, settings.NAD83]
 
 
 # ============================================================================
@@ -70,12 +67,11 @@ def build_argument_parser():
                                            valid_pixel_size_units,
                                            valid_image_extents_units,
                                            valid_resample_methods,
-                                           valid_datums)
+                                           settings.VALID_DATUMS)
 
     parameters.add_work_directory_parameter(parser)
 
     return parser
-# END - build_argument_parser
 
 
 # ============================================================================
@@ -93,8 +89,7 @@ def validate_parameters(parms, scene):
                                                 valid_pixel_size_units,
                                                 valid_image_extents_units,
                                                 valid_resample_methods,
-                                                valid_datums)
-# END - validate_parameters
+                                                settings.VALID_DATUMS)
 
 
 # ============================================================================
@@ -116,7 +111,6 @@ def build_sinu_proj4_string(central_meridian, false_easting, false_northing):
                        settings.SINUSOIDAL_SPHERE_RADIUS))
 
     return proj4_string
-# END - build_sinu_proj4_string
 
 
 # ============================================================================
@@ -139,7 +133,6 @@ def build_albers_proj4_string(std_parallel_1, std_parallel_2, origin_lat,
                        central_meridian, false_easting, false_northing, datum))
 
     return proj4_string
-# END - build_albers_proj4_string
 
 
 # ============================================================================
@@ -172,7 +165,6 @@ def build_utm_proj4_string(utm_zone, utm_north_south):
                          % utm_north_south)
 
     return proj4_string
-# END - build_utm_proj4_string
 
 
 # ============================================================================
@@ -197,7 +189,6 @@ def build_ps_proj4_string(lat_ts, lon_pole, origin_lat,
                        false_easting, false_northing))
 
     return proj4_string
-# END - build_ps_proj4_string
 
 
 # ============================================================================
@@ -246,7 +237,6 @@ def convert_target_projection_to_proj4(parms):
         projection = settings.GEOGRAPHIC_PROJ4_STRING
 
     return str(projection)
-# END - convert_target_projection_to_proj4
 
 
 # ============================================================================
@@ -351,7 +341,6 @@ def projection_minbox(ul_lon, ul_lat, lr_lon, lr_lat,
     logger.info(','.join([str(min_x), str(min_y), str(max_x), str(max_y)]))
 
     return (min_x, min_y, max_x, max_y)
-# END - projection_minbox
 
 
 # ============================================================================
@@ -386,7 +375,6 @@ def build_image_extents_string(parms, target_proj4):
                                         parms['maxx'], parms['maxy'])
 
     return ' '.join([str(min_x), str(min_y), str(max_x), str(max_y)])
-# END - build_image_extents_string
 
 
 # ============================================================================
@@ -418,7 +406,6 @@ def build_base_warp_command(parms, output_format='envi', original_proj4=None):
         cmd.extend(['-t_srs', "'%s'" % target_proj4])
 
     return cmd
-# END - build_base_warp_command
 
 
 # ============================================================================
@@ -468,7 +455,6 @@ def warp_image(source_file, output_file,
     finally:
         # Remove the environment variable we set above
         del os.environ['GDAL_PAM_ENABLED']
-# END - warp_image
 
 
 # ============================================================================
@@ -482,7 +468,6 @@ def convert_imageXY_to_mapXY(image_x, image_y, transform):
     map_y = transform[3] + image_x * transform[4] + image_y * transform[5]
 
     return (map_x, map_y)
-# END - convert_imageXY_to_mapXY
 
 
 # ============================================================================
@@ -782,7 +767,6 @@ def update_espa_xml(parms, xml, xml_filename):
     except Exception, e:
         raise ee.ESPAException(ee.ErrorCodes.warping,
                                str(e)), None, sys.exc_info()[2]
-# END - update_espa_xml
 
 
 # ============================================================================
@@ -801,7 +785,6 @@ def get_original_projection(img_filename):
     del ds
 
     return proj4
-# END - get_original_projection
 
 
 # ============================================================================
@@ -983,7 +966,6 @@ def warp_espa_data(parms, scene, xml_filename=None):
     finally:
         # Change back to the previous directory
         os.chdir(current_directory)
-# END - warp_espa_data
 
 
 # ============================================================================
@@ -1084,7 +1066,6 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
     finally:
         # Change back to the previous directory
         os.chdir(current_directory)
-# END - reformat
 
 
 # ============================================================================
