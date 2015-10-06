@@ -1053,6 +1053,31 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
                 if len(output) > 0:
                     logger.info(output)
 
+        # Convert from our internal ESPA/ENVI format to ENVI-BIP
+        elif input_format == 'envi' and output_format == 'envi-bip':
+            # convert_espa_to_bip
+            bip_name = metadata_filename.replace('.xml', '.img')
+            # Call with deletion of source files
+            cmd = ' '.join(['convert_espa_to_bip',
+                            '--del_src_files', '-convert_qa',
+                            '--xml', metadata_filename,
+                            '--bip', bip_name])
+
+            output = ''
+            try:
+                output = utilities.execute_cmd(cmd)
+
+                # Rename the XML file back to *.xml from *_hdf.xml
+                meta_hdf_name = metadata_filename.replace('.xml', '_hdf.xml')
+
+                os.rename(meta_hdf_name, metadata_filename)
+            except Exception as excep:
+                raise ee.ESPAException(ee.ErrorCodes.reformat,
+                                       str(excep)), None, sys.exc_info()[2]
+            finally:
+                if len(output) > 0:
+                    logger.info(output)
+
         # Requested conversion not implemented
         else:
             raise ValueError("Unsupported reformat combination (%s, %s)"
