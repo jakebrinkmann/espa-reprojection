@@ -1016,7 +1016,7 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
             # be present
             files_to_remove = glob.glob('*.tfw')
             if len(files_to_remove) > 0:
-                cmd = ' '.join(['rm', '-rf'] + files_to_remove)
+                cmd = ' '.join(['rm', '-f'] + files_to_remove)
                 logger.info(' '.join(['REMOVING TFW DATA COMMAND:', cmd]))
 
                 output = ''
