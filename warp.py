@@ -1059,7 +1059,7 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
             bip_name = metadata_filename.replace('.xml', '.img')
             # Call with deletion of source files
             cmd = ' '.join(['convert_espa_to_bip',
-                            '--del_src_files', '-convert_qa',
+                            '--del_src_files', '--convert_qa',
                             '--xml', metadata_filename,
                             '--bip', bip_name])
 
