@@ -32,7 +32,7 @@ import settings
 import utilities
 
 # local objects and methods
-import espa_exception as ee
+from espa_exception import ESPAException
 import parameters
 
 
@@ -419,6 +419,7 @@ def warp_image(source_file, output_file,
 
     logger = EspaLogging.get_logger(settings.PROCESSING_LOGGER)
 
+    output = ''
     try:
         # Turn GDAL PAM off to prevent *.aux.xml files
         os.environ['GDAL_PAM_ENABLED'] = 'NO'
@@ -444,13 +445,11 @@ def warp_image(source_file, output_file,
         logger.info("Warping %s with %s" % (source_file, cmd))
 
         output = utilities.execute_cmd(cmd)
+
+    finally:
         if len(output) > 0:
             logger.info(output)
 
-    except Exception:
-        raise
-
-    finally:
         # Remove the environment variable we set above
         del os.environ['GDAL_PAM_ENABLED']
 
@@ -494,9 +493,8 @@ def update_espa_xml(parms, xml, xml_filename):
                 ds_transform = ds.GetGeoTransform()
                 ds_srs = osr.SpatialReference()
                 ds_srs.ImportFromWkt(ds.GetProjection())
-            except Exception as excep:
-                raise ee.ESPAException(ee.ErrorCodes.warping,
-                                       str(excep)), None, sys.exc_info()[2]
+            except Exception:
+                raise
 
             projection_name = ds_srs.GetAttrValue('PROJECTION')
 
@@ -762,9 +760,8 @@ def update_espa_xml(parms, xml, xml_filename):
         # Rename the temp file back to the original name
         os.rename(tmp_xml_filename, xml_filename)
 
-    except Exception as excep:
-        raise ee.ESPAException(ee.ErrorCodes.warping,
-                               str(excep)), None, sys.exc_info()[2]
+    except Exception:
+        raise
 
 
 # ============================================================================
@@ -810,7 +807,7 @@ def warp_espa_data(parms, scene, xml_filename=None):
 
     # Verify something was provided for the XML filename
     if xml_filename is None or xml_filename == '':
-        raise ee.ESPAException(ee.ErrorCodes.warping, "Missing XML Filename")
+        raise ESPAException("Missing XML Filename")
 
     # Change to the working directory
     current_directory = os.getcwd()
@@ -879,9 +876,8 @@ def warp_espa_data(parms, scene, xml_filename=None):
             ds_band = None
             try:
                 ds_band = ds.GetRasterBand(1)
-            except Exception as excep:
-                raise ee.ESPAException(ee.ErrorCodes.warping,
-                                       str(excep)), None, sys.exc_info()[2]
+            except Exception:
+                raise
 
             # Save the no data value since gdalwarp does not write it out when
             # using the ENVI format
@@ -958,9 +954,6 @@ def warp_espa_data(parms, scene, xml_filename=None):
 
         del xml
 
-    except Exception as excep:
-        raise ee.ESPAException(ee.ErrorCodes.warping,
-                               str(excep)), None, sys.exc_info()[2]
     finally:
         # Change back to the previous directory
         os.chdir(current_directory)
@@ -1005,9 +998,6 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
                 meta_gtiff_name = ''.join([meta_gtiff_name, '_gtif.xml'])
 
                 os.rename(meta_gtiff_name, metadata_filename)
-            except Exception as excep:
-                raise ee.ESPAException(ee.ErrorCodes.reformat,
-                                       str(excep)), None, sys.exc_info()[2]
             finally:
                 if len(output) > 0:
                     logger.info(output)
@@ -1022,9 +1012,6 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
                 output = ''
                 try:
                     output = utilities.execute_cmd(cmd)
-                except Exception as excep:
-                    raise ee.ESPAException(ee.ErrorCodes.reformat,
-                                           str(excep)), None, sys.exc_info()[2]
                 finally:
                     if len(output) > 0:
                         logger.info(output)
@@ -1046,9 +1033,6 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
                 meta_hdf_name = metadata_filename.replace('.xml', '_hdf.xml')
 
                 os.rename(meta_hdf_name, metadata_filename)
-            except Exception as excep:
-                raise ee.ESPAException(ee.ErrorCodes.reformat,
-                                       str(excep)), None, sys.exc_info()[2]
             finally:
                 if len(output) > 0:
                     logger.info(output)
@@ -1071,9 +1055,6 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
                 meta_hdf_name = metadata_filename.replace('.xml', '_hdf.xml')
 
                 os.rename(meta_hdf_name, metadata_filename)
-            except Exception as excep:
-                raise ee.ESPAException(ee.ErrorCodes.reformat,
-                                       str(excep)), None, sys.exc_info()[2]
             finally:
                 if len(output) > 0:
                     logger.info(output)
@@ -1083,44 +1064,6 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
             raise ValueError("Unsupported reformat combination (%s, %s)"
                              % (input_format, output_format))
 
-    except Exception as excep:
-        raise ee.ESPAException(ee.ErrorCodes.reformat,
-                               str(excep)), None, sys.exc_info()[2]
     finally:
         # Change back to the previous directory
         os.chdir(current_directory)
-
-
-# ============================================================================
-if __name__ == '__main__':
-    '''
-    Description:
-      Read parameters from the command line and build a JSON dictionary from
-      them.  Pass the JSON dictionary to the process routine.
-    '''
-
-    # Build the command line argument parser
-    parser = build_argument_parser()
-
-    # Parse the command line arguments
-    args = parser.parse_args()
-    args_dict = vars(parser.parse_args())
-
-    # Configure logging
-    EspaLogging.configure(settings.PROCESSING_LOGGER, order='test',
-                          product='product', debug=args.debug)
-    logger = EspaLogging.get_logger(settings.PROCESSING_LOGGER)
-
-    # Build our JSON formatted input from the command line parameters
-    options = {k: args_dict[k] for k in args_dict if args_dict[k] is not None}
-
-    try:
-        # Call the main processing routine
-        warp_espa_data(options, parms['scene'])
-    except Exception as excep:
-        if hasattr(excep, 'output'):
-            logger.error("Output [%s]" % e.output)
-        logger.exception("Processing failed")
-        sys.exit(1)
-
-    sys.exit(0)
