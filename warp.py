@@ -506,9 +506,6 @@ def update_espa_xml(parms, xml, xml_filename):
             x_pixel_size = abs(ds_transform[1])
             y_pixel_size = abs(ds_transform[5])
 
-            del ds_band
-            del ds
-
             # Update the band information in the XML file
             band.set_nlines(number_of_lines)
             band.set_nsamps(number_of_samples)
@@ -533,6 +530,68 @@ def update_espa_xml(parms, xml, xml_filename):
             else:
                 # Must be Geographic Projection
                 band_pixel_size.set_units('degrees')
+
+            # If the CFmask band is precent, fix the statistics
+            if band.product == 'cfmask' and band.name == 'cfmask':
+                fill_value = int(band.fill_value)
+                cfmask_data = ds_band.ReadAsArray(0, 0,
+                                                  ds_band.XSize,
+                                                  ds_band.YSize)
+
+                # Get the counts
+                non_fill_count = (
+                    float(ds_band.XSize * ds_band.YSize -
+                          len(np.where(cfmask_data == fill_value)[0])))
+                clear_count = float(len(np.where(cfmask_data == 0)[0]))
+                water_count = float(len(np.where(cfmask_data == 1)[0]))
+                cs_count = float(len(np.where(cfmask_data == 2)[0]))
+                snow_count = float(len(np.where(cfmask_data == 3)[0]))
+                cloud_count = float(len(np.where(cfmask_data == 4)[0]))
+                logger.debug('non_fill_count {0}'.format(non_fill_count))
+                logger.debug('clear_count {0}'.format(clear_count))
+                logger.debug('water_count {0}'.format(water_count))
+                logger.debug('cloud_shadow_count {0}'.format(cs_count))
+                logger.debug('snow_count {0}'.format(snow_count))
+                logger.debug('cloud_count {0}'.format(cloud_count))
+
+                del cfmask_data
+                cfmask_data = None
+
+                # Get the percentages and truncate to a string
+                clear_percent = 100.0 * clear_count / non_fill_count
+                clear_percent = '{0:0.2f}'.format(clear_percent)
+                water_percent = 100.0 * water_count / non_fill_count
+                water_percent = '{0:0.2f}'.format(water_percent)
+                cs_percent = 100.0 * cs_count / non_fill_count
+                cs_percent = '{0:0.2f}'.format(cs_percent)
+                snow_percent = 100.0 * snow_count / non_fill_count
+                snow_percent = '{0:0.2f}'.format(snow_percent)
+                cloud_percent = 100.0 * cloud_count / non_fill_count
+                cloud_percent = '{0:0.2f}'.format(cloud_percent)
+                logger.debug('clear_percent {0}'.format(clear_percent))
+                logger.debug('water_percent {0}'.format(water_percent))
+                logger.debug('cloud_shadow_percent {0}'.format(cs_percent))
+                logger.debug('snow_percent {0}'.format(snow_percent))
+                logger.debug('cloud_percent {0}'.format(cloud_percent))
+
+                # Build the coverages component
+                coverage = metadata_api.percent_coverage()
+                cover = metadata_api.cover('clear', clear_percent)
+                coverage.add_cover(cover)
+                cover = metadata_api.cover('water', water_percent)
+                coverage.add_cover(cover)
+                cover = metadata_api.cover('cloud_shadow', cs_percent)
+                coverage.add_cover(cover)
+                cover = metadata_api.cover('snow', snow_percent)
+                coverage.add_cover(cover)
+                cover = metadata_api.cover('cloud', cloud_percent)
+                coverage.add_cover(cover)
+
+                # Apply the coverages to the XML
+                band.percent_coverage = coverage
+
+            del ds_band
+            del ds
 
         ######################################################################
         # Fix the projection information for the warped data
