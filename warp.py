@@ -558,15 +558,22 @@ def update_espa_xml(parms, xml, xml_filename):
                 cfmask_data = None
 
                 # Get the percentages and truncate to a string
-                clear_percent = 100.0 * clear_count / non_fill_count
+                clear_percent = 0.0
+                water_percent = 0.0
+                cs_percent = 0.0
+                snow_percent = 0.0
+                cloud_percent = 0.0
+                if non_fill_count > 0:
+                    clear_percent = 100.0 * clear_count / non_fill_count
+                    water_percent = 100.0 * water_count / non_fill_count
+                    cs_percent = 100.0 * cs_count / non_fill_count
+                    snow_percent = 100.0 * snow_count / non_fill_count
+                    cloud_percent = 100.0 * cloud_count / non_fill_count
+
                 clear_percent = '{0:0.2f}'.format(clear_percent)
-                water_percent = 100.0 * water_count / non_fill_count
                 water_percent = '{0:0.2f}'.format(water_percent)
-                cs_percent = 100.0 * cs_count / non_fill_count
                 cs_percent = '{0:0.2f}'.format(cs_percent)
-                snow_percent = 100.0 * snow_count / non_fill_count
                 snow_percent = '{0:0.2f}'.format(snow_percent)
-                cloud_percent = 100.0 * cloud_count / non_fill_count
                 cloud_percent = '{0:0.2f}'.format(cloud_percent)
                 logger.debug('clear_percent {0}'.format(clear_percent))
                 logger.debug('water_percent {0}'.format(water_percent))
