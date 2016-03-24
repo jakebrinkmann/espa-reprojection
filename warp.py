@@ -804,10 +804,7 @@ def warp_espa_data(parms, scene, xml_filename=None):
     logger = EspaLogging.get_logger(settings.PROCESSING_LOGGER)
 
     # Validate the parameters
-    parameters.validate_reprojection_parameters(parms,
-                                                scene,
-                                                settings.VALID_DATUMS)
-    logger.debug(parms)
+    parameters.validate_reprojection_parameters(parms, scene)
 
     # ------------------------------------------------------------------------
     # De-register the DOQ drivers since they may cause a problem with some of
