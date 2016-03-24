@@ -36,60 +36,6 @@ from espa_exception import ESPAException
 import parameters
 
 
-# These contain valid warping options
-valid_resample_methods = ['near', 'bilinear', 'cubic', 'cubicspline',
-                          'lanczos']
-valid_pixel_size_units = ['meters', 'dd']
-valid_image_extents_units = ['meters', 'dd']
-valid_projections = ['sinu', 'aea', 'utm', 'ps', 'lonlat']
-valid_ns = ['north', 'south']
-
-
-# ============================================================================
-def build_argument_parser():
-    '''
-    Description:
-      Build the command line argument parser.
-    '''
-
-    # Create a command line argument parser
-    description = "Alters product extents, projections and pixel sizes"
-    parser = ArgumentParser(description=description)
-
-    # Add parameters
-    parameters.add_debug_parameter(parser)
-
-    parameters.add_reprojection_parameters(parser,
-                                           valid_projections,
-                                           valid_ns,
-                                           valid_pixel_size_units,
-                                           valid_image_extents_units,
-                                           valid_resample_methods,
-                                           settings.VALID_DATUMS)
-
-    parameters.add_work_directory_parameter(parser)
-
-    return parser
-
-
-# ============================================================================
-def validate_parameters(parms, scene):
-    '''
-    Description:
-      Make sure all the parameters needed for this and called routines
-      is available with the provided input parameters.
-    '''
-
-    parameters.validate_reprojection_parameters(parms,
-                                                scene,
-                                                valid_projections,
-                                                valid_ns,
-                                                valid_pixel_size_units,
-                                                valid_image_extents_units,
-                                                valid_resample_methods,
-                                                settings.VALID_DATUMS)
-
-
 # ============================================================================
 def build_sinu_proj4_string(central_meridian, false_easting, false_northing):
     '''
@@ -858,7 +804,9 @@ def warp_espa_data(parms, scene, xml_filename=None):
     logger = EspaLogging.get_logger(settings.PROCESSING_LOGGER)
 
     # Validate the parameters
-    validate_parameters(parms, scene)
+    parameters.validate_reprojection_parameters(parms,
+                                                scene,
+                                                settings.VALID_DATUMS)
     logger.debug(parms)
 
     # ------------------------------------------------------------------------
