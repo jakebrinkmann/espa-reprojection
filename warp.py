@@ -26,12 +26,9 @@ import numpy as np
 # espa-common objects and methods
 import metadata_api
 
-# imports from espa_common
-from logger_factory import EspaLogging
 import settings
 import utilities
-
-# local objects and methods
+from logging_tools import EspaLogging
 from espa_exception import ESPAException
 import parameters
 
