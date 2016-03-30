@@ -1,17 +1,8 @@
 
 '''
-License:
-  "NASA Open Source Agreement 1.3"
+Description: Alters product extents, projections and pixel sizes.
 
-Description:
-  See 'Description' under '__main__' for more details.
-  Alters product extents, projections and pixel sizes.
-
-History:
-  Original Development (cdr_ecv.py) by David V. Hill, USGS/EROS
-  Created Jan/2014 by Ron Dilley, USGS/EROS
-    - Gutted the original implementation from cdr_ecv.py and placed it in this
-      file.
+License: NASA Open Source Agreement 1.3
 '''
 
 import os
@@ -33,7 +24,6 @@ from espa_exception import ESPAException
 import parameters
 
 
-# ============================================================================
 def build_sinu_proj4_string(central_meridian, false_easting, false_northing):
     '''
     Description:
@@ -54,7 +44,6 @@ def build_sinu_proj4_string(central_meridian, false_easting, false_northing):
     return proj4_string
 
 
-# ============================================================================
 def build_albers_proj4_string(std_parallel_1, std_parallel_2, origin_lat,
                               central_meridian, false_easting, false_northing,
                               datum):
@@ -76,7 +65,6 @@ def build_albers_proj4_string(std_parallel_1, std_parallel_2, origin_lat,
     return proj4_string
 
 
-# ============================================================================
 def build_utm_proj4_string(utm_zone, utm_north_south):
     '''
     Description:
@@ -108,7 +96,6 @@ def build_utm_proj4_string(utm_zone, utm_north_south):
     return proj4_string
 
 
-# ============================================================================
 def build_ps_proj4_string(lat_ts, lon_pole, origin_lat,
                           false_easting, false_northing):
     '''
@@ -132,7 +119,6 @@ def build_ps_proj4_string(lat_ts, lon_pole, origin_lat,
     return proj4_string
 
 
-# ============================================================================
 def convert_target_projection_to_proj4(parms):
     '''
     Description:
@@ -180,7 +166,6 @@ def convert_target_projection_to_proj4(parms):
     return str(projection)
 
 
-# ============================================================================
 def projection_minbox(ul_lon, ul_lat, lr_lon, lr_lat,
                       target_proj4, pixel_size, pixel_size_units):
     '''
@@ -284,7 +269,6 @@ def projection_minbox(ul_lon, ul_lat, lr_lon, lr_lat,
     return (min_x, min_y, max_x, max_y)
 
 
-# ============================================================================
 def build_image_extents_string(parms, target_proj4):
     '''
     Description:
@@ -318,7 +302,6 @@ def build_image_extents_string(parms, target_proj4):
     return ' '.join([str(min_x), str(min_y), str(max_x), str(max_y)])
 
 
-# ============================================================================
 def build_base_warp_command(parms, output_format='envi', original_proj4=None):
 
     # Get the proj4 projection string
@@ -349,7 +332,6 @@ def build_base_warp_command(parms, output_format='envi', original_proj4=None):
     return cmd
 
 
-# ============================================================================
 def warp_image(source_file, output_file,
                base_warp_command=None,
                resample_method='near',
@@ -397,7 +379,6 @@ def warp_image(source_file, output_file,
         del os.environ['GDAL_PAM_ENABLED']
 
 
-# ============================================================================
 def convert_imageXY_to_mapXY(image_x, image_y, transform):
     '''
     Description:
@@ -410,7 +391,6 @@ def convert_imageXY_to_mapXY(image_x, image_y, transform):
     return (map_x, map_y)
 
 
-# ============================================================================
 def update_espa_xml(parms, xml, xml_filename):
 
     logger = EspaLogging.get_logger(settings.PROCESSING_LOGGER)
@@ -577,7 +557,6 @@ def update_espa_xml(parms, xml, xml_filename):
         # Rebuild the projection parameters
         projection_name = ds_srs.GetAttrValue('PROJECTION')
         if projection_name is not None:
-            # ----------------------------------------------------------------
             if projection_name.lower().startswith('transverse_mercator'):
                 logger.info("---- Updating UTM Parameters")
                 # Get the parameter values
@@ -590,7 +569,7 @@ def update_espa_xml(parms, xml, xml_filename):
                 # Update the attribute values
                 gm.projection_information.set_projection("UTM")
                 gm.projection_information.set_datum(settings.WGS84)
-            # ----------------------------------------------------------------
+
             elif projection_name.lower().startswith('polar'):
                 logger.info("---- Updating Polar Stereographic Parameters")
                 # Get the parameter values
@@ -609,7 +588,7 @@ def update_espa_xml(parms, xml, xml_filename):
                 # Update the attribute values
                 gm.projection_information.set_projection("PS")
                 gm.projection_information.set_datum(settings.WGS84)
-            # ----------------------------------------------------------------
+
             elif projection_name.lower().startswith('albers'):
                 logger.info("---- Updating Albers Equal Area Parameters")
                 # Get the parameter values
@@ -635,7 +614,7 @@ def update_espa_xml(parms, xml, xml_filename):
                 # This projection can have different datums, so use the datum
                 # requested by the user
                 gm.projection_information.set_datum(datum)
-            # ----------------------------------------------------------------
+
             elif projection_name.lower().startswith('sinusoidal'):
                 logger.info("---- Updating Sinusoidal Parameters")
                 # Get the parameter values
@@ -656,8 +635,8 @@ def update_espa_xml(parms, xml, xml_filename):
                 # This projection doesn't have a datum
                 del gm.projection_information.datum
                 gm.projection_information.datum = None
+
         else:
-            # ----------------------------------------------------------------
             # Must be Geographic Projection
             logger.info("---- Updating Geographic Parameters")
             gm.projection_information.set_projection('GEO')
@@ -773,7 +752,6 @@ def update_espa_xml(parms, xml, xml_filename):
         raise
 
 
-# ============================================================================
 def get_original_projection(img_filename):
 
     ds = gdal.Open(img_filename)
@@ -791,7 +769,6 @@ def get_original_projection(img_filename):
     return proj4
 
 
-# ============================================================================
 def warp_espa_data(parms, scene, xml_filename=None):
     '''
     Description:
@@ -803,7 +780,6 @@ def warp_espa_data(parms, scene, xml_filename=None):
     # Validate the parameters
     parameters.validate_reprojection_parameters(parms, scene)
 
-    # ------------------------------------------------------------------------
     # De-register the DOQ drivers since they may cause a problem with some of
     # our generated imagery.  And we are only processing envi format today
     # inside the processing code.
@@ -811,7 +787,6 @@ def warp_espa_data(parms, scene, xml_filename=None):
     doq2 = gdal.GetDriverByName('DOQ2')
     doq1.Deregister()
     doq2.Deregister()
-    # ------------------------------------------------------------------------
 
     # Verify something was provided for the XML filename
     if xml_filename is None or xml_filename == '':
@@ -909,9 +884,7 @@ def warp_espa_data(parms, scene, xml_filename=None):
                        no_data_value=no_data_value)
 
             ##################################################################
-            ##################################################################
             # Get new everything for the re-projected band
-            ##################################################################
             ##################################################################
 
             # Update the tmp ENVI header with our own values for some fields
@@ -940,7 +913,6 @@ def warp_espa_data(parms, scene, xml_filename=None):
                     elif (line.startswith('data type') and
                           (no_data_value is not None)):
                         sb.write('data ignore value = %s\n' % no_data_value)
-            # END - with tmp_fd
 
             # Do the actual replace here
             with open(tmp_hdr_filename, 'w') as tmp_fd:
@@ -955,7 +927,6 @@ def warp_espa_data(parms, scene, xml_filename=None):
             # Rename the temps file back to the original name
             os.rename(tmp_img_filename, img_filename)
             os.rename(tmp_hdr_filename, hdr_filename)
-        # END for each band in the XML file
 
         # Update the XML to reflect the new warped output
         update_espa_xml(parms, xml, xml_filename)
@@ -967,7 +938,6 @@ def warp_espa_data(parms, scene, xml_filename=None):
         os.chdir(current_directory)
 
 
-# ============================================================================
 def reformat(metadata_filename, work_directory, input_format, output_format):
     '''
     Description:
