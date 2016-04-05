@@ -544,7 +544,7 @@ def update_espa_xml(parms, espa_metadata):
         if parms['image_extents']:
             gm.remove(gm.scene_center_time)
 
-        # Remove the projection parameter object from the structure so that it
+        # Find the projection parameter object from the structure so that it
         # can be replaced with the new one
         # Geographic doesn't have one
         old_proj_params = None
