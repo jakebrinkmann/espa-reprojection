@@ -547,19 +547,20 @@ def update_espa_xml(parms, espa_metadata):
         # Remove the projection parameter object from the structure so that it
         # can be replaced with the new one
         # Geographic doesn't have one
+        old_proj_params = None
         for item in gm.projection_information.getchildren():
             if 'utm_proj_params' in item.tag:
-                parent = item.getparent()
-                parent.remove(item)
-            if 'ps_proj_params' in item.tag:
-                parent = item.getparent()
-                parent.remove(item)
-            if 'albers_proj_params' in item.tag:
-                parent = item.getparent()
-                parent.remove(item)
-            if 'sin_proj_params' in item.tag:
-                parent = item.getparent()
-                parent.remove(item)
+                old_proj_params = item
+                break
+            elif 'ps_proj_params' in item.tag:
+                old_proj_params = item
+                break
+            elif 'albers_proj_params' in item.tag:
+                old_proj_params = item
+                break
+            elif 'sin_proj_params' in item.tag:
+                old_proj_params = item
+                break
 
         # Rebuild the projection parameters
         projection_name = ds_srs.GetAttrValue('PROJECTION')
@@ -572,7 +573,8 @@ def update_espa_xml(parms, espa_metadata):
                 utm_proj_params = em.utm_proj_params()
                 utm_proj_params.zone_code = em.item(zone)
                 # Add the object to the projection information
-                gm.projection_information.utm_proj_params = utm_proj_params
+                gm.projection_information.replace(old_proj_params,
+                                                  utm_proj_params)
                 # Update the attribute values
                 gm.projection_information.attrib['projection'] = 'UTM'
                 gm.projection_information.attrib['datum'] = settings.WGS84
@@ -592,7 +594,8 @@ def update_espa_xml(parms, espa_metadata):
                 ps_proj_params.false_easting = em.item(false_easting)
                 ps_proj_params.false_northing = em.item(false_northing)
                 # Add the object to the projection information
-                gm.projection_information.ps_proj_params = ps_proj_params
+                gm.projection_information.replace(old_proj_params,
+                                                  ps_proj_params)
                 # Update the attribute values
                 gm.projection_information.attrib['projection'] = 'PS'
                 gm.projection_information.attrib['datum'] = settings.WGS84
@@ -617,8 +620,8 @@ def update_espa_xml(parms, espa_metadata):
                 albers_proj_params.false_easting = em.item(false_easting)
                 albers_proj_params.false_northing = em.item(false_northing)
                 # Add the object to the projection information
-                gm.projection_information.albers_proj_params = \
-                    albers_proj_params
+                gm.projection_information.replace(old_proj_params,
+                                                  albers_proj_params)
                 # Update the attribute values
                 gm.projection_information.attrib['projection'] = 'ALBERS'
                 # This projection can have different datums, so use the datum
@@ -639,7 +642,8 @@ def update_espa_xml(parms, espa_metadata):
                 sin_proj_params.false_easting = em.item(false_easting)
                 sin_proj_params.false_northing = em.item(false_northing)
                 # Add the object to the projection information
-                gm.projection_information.sin_proj_params = sin_proj_params
+                gm.projection_information.replace(old_proj_params,
+                                                  sin_proj_params)
                 # Update the attribute values
                 gm.projection_information.attrib['projection'] = 'SIN'
 
@@ -649,6 +653,7 @@ def update_espa_xml(parms, espa_metadata):
             gm.projection_information.attrib['projection'] = 'GEO'
             gm.projection_information.attrib['datum'] = settings.WGS84
             gm.projection_information.attrib['units'] = 'degrees'
+            gm.projection_information.remove(old_proj_params)
 
         # Fix the UL and LR center of pixel map coordinates
         (map_ul_x, map_ul_y) = convert_imageXY_to_mapXY(0.5, 0.5,
@@ -731,11 +736,13 @@ def update_espa_xml(parms, espa_metadata):
             south_lat = min(left_lat, right_lat, south_lat)
 
         # Update the bounding coordinates in the XML
-        bounding_coordinates = gm.bounding_coordinates
+        old_bounding_coordinates = gm.bounding_coordinates
+        bounding_coordinates = em.bounding_coordinates()
         bounding_coordinates.west = em.item(west_lon)
         bounding_coordinates.east = em.item(east_lon)
         bounding_coordinates.north = em.item(north_lat)
         bounding_coordinates.south = em.item(south_lat)
+        gm.replace(old_bounding_coordinates, bounding_coordinates)
 
         del ds_transform
         del ds_srs
