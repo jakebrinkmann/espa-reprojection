@@ -11,11 +11,13 @@ import glob
 import copy
 from cStringIO import StringIO
 from argparse import ArgumentParser
+from lxml import objectify as objectify
 from osgeo import gdal, osr
 import numpy as np
 
-# espa-common objects and methods
-import metadata_api
+
+from espa import MetadataError, Metadata
+
 
 import settings
 import utilities
@@ -391,7 +393,7 @@ def convert_imageXY_to_mapXY(image_x, image_y, transform):
     return (map_x, map_y)
 
 
-def update_espa_xml(parms, xml, xml_filename):
+def update_espa_xml(parms, espa_metadata):
 
     logger = EspaLogging.get_logger(settings.PROCESSING_LOGGER)
 
@@ -401,9 +403,13 @@ def update_espa_xml(parms, xml, xml_filename):
         if parms['datum'] is not None:
             datum = parms['datum']
 
-        bands = xml.get_bands()
-        for band in bands.band:
-            img_filename = band.get_file_name()
+        # Create an element maker
+        em = objectify.ElementMaker(annotate=False,
+                                    namespace=None,
+                                    nsmap=None)
+
+        for band in espa_metadata.xml_object.bands.band:
+            img_filename = str(band.file_name)
             logger.info("Updating XML for %s" % img_filename)
 
             ds = gdal.Open(img_filename)
@@ -421,8 +427,8 @@ def update_espa_xml(parms, xml, xml_filename):
 
             projection_name = ds_srs.GetAttrValue('PROJECTION')
 
-            number_of_lines = float(ds_band.YSize)
-            number_of_samples = float(ds_band.XSize)
+            number_of_lines = int(ds_band.YSize)
+            number_of_samples = int(ds_band.XSize)
             # Need to abs these because they are coming from the transform,
             # which may becorrect for the transform,
             # but not how us humans understand it
@@ -430,33 +436,32 @@ def update_espa_xml(parms, xml, xml_filename):
             y_pixel_size = abs(ds_transform[5])
 
             # Update the band information in the XML file
-            band.set_nlines(number_of_lines)
-            band.set_nsamps(number_of_samples)
-            band_pixel_size = band.get_pixel_size()
-            band_pixel_size.set_x(x_pixel_size)
-            band_pixel_size.set_y(y_pixel_size)
+            band.attrib['nlines'] = str(number_of_lines)
+            band.attrib['nsamps'] = str(number_of_samples)
+            band.pixel_size.attrib['x'] = str(x_pixel_size)
+            band.pixel_size.attrib['y'] = str(y_pixel_size)
 
             # For sanity report the resample method applied to the data
-            resample_method = band.get_resample_method()
-            logger.info("RESAMPLE METHOD [%s]" % resample_method)
+            logger.info("RESAMPLE METHOD [%s]" % band.resample_method)
 
             # We only support one unit type for each projection
             if projection_name is not None:
                 if projection_name.lower().startswith('transverse_mercator'):
-                    band_pixel_size.set_units('meters')
+                    band.pixel_size.attrib['units'] = 'meters'
                 elif projection_name.lower().startswith('polar'):
-                    band_pixel_size.set_units('meters')
+                    band.pixel_size.attrib['units'] = 'meters'
                 elif projection_name.lower().startswith('albers'):
-                    band_pixel_size.set_units('meters')
+                    band.pixel_size.attrib['units'] = 'meters'
                 elif projection_name.lower().startswith('sinusoidal'):
-                    band_pixel_size.set_units('meters')
+                    band.pixel_size.attrib['units'] = 'meters'
             else:
                 # Must be Geographic Projection
-                band_pixel_size.set_units('degrees')
+                band.pixel_size.attrib['units'] = 'degrees'
 
-            # If the CFmask band is precent, fix the statistics
-            if band.product == 'cfmask' and band.name == 'cfmask':
-                fill_value = int(band.fill_value)
+            # If the CFmask band is present, fix the statistics
+            if (band.attrib['product'] == 'cfmask' and
+                    band.attrib['name'] == 'cfmask'):
+                fill_value = int(band.attrib['fill_value'])
                 cfmask_data = ds_band.ReadAsArray(0, 0,
                                                   ds_band.XSize,
                                                   ds_band.YSize)
@@ -505,20 +510,25 @@ def update_espa_xml(parms, xml, xml_filename):
                 logger.debug('cloud_percent {0}'.format(cloud_percent))
 
                 # Build the coverages component
-                coverage = metadata_api.percent_coverage()
-                cover = metadata_api.cover('clear', clear_percent)
-                coverage.add_cover(cover)
-                cover = metadata_api.cover('water', water_percent)
-                coverage.add_cover(cover)
-                cover = metadata_api.cover('cloud_shadow', cs_percent)
-                coverage.add_cover(cover)
-                cover = metadata_api.cover('snow', snow_percent)
-                coverage.add_cover(cover)
-                cover = metadata_api.cover('cloud', cloud_percent)
-                coverage.add_cover(cover)
+                percent_coverage = em.percent_coverage()
+                cover = em.cover()
+                cover.attrib['clear'] = clear_percent
+                percent_coverage.append(cover)
+                cover = em.cover()
+                cover.attrib['water'] = water_percent
+                percent_coverage.append(cover)
+                cover = em.cover()
+                cover.attrib['cloud_shadow'] = cs_percent
+                percent_coverage.append(cover)
+                cover = em.cover()
+                cover.attrib['snow'] = snow_percent
+                percent_coverage.append(cover)
+                cover = em.cover()
+                cover.attrib['cloud'] = cloud_percent
+                percent_coverage.append(cover)
 
                 # Apply the coverages to the XML
-                band.percent_coverage = coverage
+                band.percent_coverage = percent_coverage
 
             del ds_band
             del ds
@@ -526,33 +536,30 @@ def update_espa_xml(parms, xml, xml_filename):
         ######################################################################
         # Fix the projection information for the warped data
         ######################################################################
-        gm = xml.get_global_metadata()
+        gm = espa_metadata.xml_object.global_metadata
 
         # If the image extents were changed, then the scene center time is
         # meaningless so just remove it
         # We don't have any way to calculate a new one
         if parms['image_extents']:
-            del gm.scene_center_time
-            gm.scene_center_time = None
+            gm.remove(gm.scene_center_time)
 
         # Remove the projection parameter object from the structure so that it
         # can be replaced with the new one
         # Geographic doesn't have one
-        if gm.projection_information.utm_proj_params is not None:
-            del gm.projection_information.utm_proj_params
-            gm.projection_information.utm_proj_params = None
-
-        if gm.projection_information.ps_proj_params is not None:
-            del gm.projection_information.ps_proj_params
-            gm.projection_information.ps_proj_params = None
-
-        if gm.projection_information.albers_proj_params is not None:
-            del gm.projection_information.albers_proj_params
-            gm.projection_information.albers_proj_params = None
-
-        if gm.projection_information.sin_proj_params is not None:
-            del gm.projection_information.sin_proj_params
-            gm.projection_information.sin_proj_params = None
+        for item in gm.projection_information.getchildren():
+            if 'utm_proj_params' in item.tag:
+                parent = item.getparent()
+                parent.remove(item)
+            if 'ps_proj_params' in item.tag:
+                parent = item.getparent()
+                parent.remove(item)
+            if 'albers_proj_params' in item.tag:
+                parent = item.getparent()
+                parent.remove(item)
+            if 'sin_proj_params' in item.tag:
+                parent = item.getparent()
+                parent.remove(item)
 
         # Rebuild the projection parameters
         projection_name = ds_srs.GetAttrValue('PROJECTION')
@@ -562,13 +569,13 @@ def update_espa_xml(parms, xml, xml_filename):
                 # Get the parameter values
                 zone = int(ds_srs.GetUTMZone())
                 # Get a new UTM projection parameter object and populate it
-                utm_projection = metadata_api.utm_proj_params()
-                utm_projection.set_zone_code(zone)
+                utm_proj_params = em.utm_proj_params()
+                utm_proj_params.zone_code = em.item(zone)
                 # Add the object to the projection information
-                gm.projection_information.set_utm_proj_params(utm_projection)
+                gm.projection_information.utm_proj_params = utm_proj_params
                 # Update the attribute values
-                gm.projection_information.set_projection("UTM")
-                gm.projection_information.set_datum(settings.WGS84)
+                gm.projection_information.attrib['projection'] = 'UTM'
+                gm.projection_information.attrib['datum'] = settings.WGS84
 
             elif projection_name.lower().startswith('polar'):
                 logger.info("---- Updating Polar Stereographic Parameters")
@@ -578,16 +585,17 @@ def update_espa_xml(parms, xml, xml_filename):
                 false_easting = ds_srs.GetProjParm('false_easting')
                 false_northing = ds_srs.GetProjParm('false_northing')
                 # Get a new PS projection parameter object and populate it
-                ps_projection = metadata_api.ps_proj_params()
-                ps_projection.set_latitude_true_scale(latitude_true_scale)
-                ps_projection.set_longitude_pole(longitude_pole)
-                ps_projection.set_false_easting(false_easting)
-                ps_projection.set_false_northing(false_northing)
+                ps_proj_params = em.ps_proj_params()
+                ps_proj_params.longitude_pole = em.item(longitude_pole)
+                ps_proj_params.latitude_true_scale = \
+                    em.item(latitude_true_scale)
+                ps_proj_params.false_easting = em.item(false_easting)
+                ps_proj_params.false_northing = em.item(false_northing)
                 # Add the object to the projection information
-                gm.projection_information.set_ps_proj_params(ps_projection)
+                gm.projection_information.ps_proj_params = ps_proj_params
                 # Update the attribute values
-                gm.projection_information.set_projection("PS")
-                gm.projection_information.set_datum(settings.WGS84)
+                gm.projection_information.attrib['projection'] = 'PS'
+                gm.projection_information.attrib['datum'] = settings.WGS84
 
             elif projection_name.lower().startswith('albers'):
                 logger.info("---- Updating Albers Equal Area Parameters")
@@ -599,21 +607,23 @@ def update_espa_xml(parms, xml, xml_filename):
                 false_easting = ds_srs.GetProjParm('false_easting')
                 false_northing = ds_srs.GetProjParm('false_northing')
                 # Get a new ALBERS projection parameter object and populate it
-                albers_projection = metadata_api.albers_proj_params()
-                albers_projection.set_standard_parallel1(standard_parallel1)
-                albers_projection.set_standard_parallel2(standard_parallel2)
-                albers_projection.set_origin_latitude(origin_latitude)
-                albers_projection.set_central_meridian(central_meridian)
-                albers_projection.set_false_easting(false_easting)
-                albers_projection.set_false_northing(false_northing)
+                albers_proj_params = em.albers_proj_params()
+                albers_proj_params.standard_parallel1 = \
+                    em.item(standard_parallel1)
+                albers_proj_params.standard_parallel2 = \
+                    em.item(standard_parallel2)
+                albers_proj_params.central_meridian = em.item(central_meridian)
+                albers_proj_params.origin_latitude = em.item(origin_latitude)
+                albers_proj_params.false_easting = em.item(false_easting)
+                albers_proj_params.false_northing = em.item(false_northing)
                 # Add the object to the projection information
-                gm.projection_information. \
-                    set_albers_proj_params(albers_projection)
+                gm.projection_information.albers_proj_params = \
+                    albers_proj_params
                 # Update the attribute values
-                gm.projection_information.set_projection("ALBERS")
+                gm.projection_information.attrib['projection'] = 'ALBERS'
                 # This projection can have different datums, so use the datum
                 # requested by the user
-                gm.projection_information.set_datum(datum)
+                gm.projection_information.attrib['datum'] = datum
 
             elif projection_name.lower().startswith('sinusoidal'):
                 logger.info("---- Updating Sinusoidal Parameters")
@@ -622,26 +632,23 @@ def update_espa_xml(parms, xml, xml_filename):
                 false_easting = ds_srs.GetProjParm('false_easting')
                 false_northing = ds_srs.GetProjParm('false_northing')
                 # Get a new SIN projection parameter object and populate it
-                sin_projection = metadata_api.sin_proj_params()
-                sin_projection.set_sphere_radius(
-                    settings.SINUSOIDAL_SPHERE_RADIUS)
-                sin_projection.set_central_meridian(central_meridian)
-                sin_projection.set_false_easting(false_easting)
-                sin_projection.set_false_northing(false_northing)
+                sin_proj_params = em.sin_proj_params()
+                sin_proj_params.sphere_radius = \
+                    em.item(settings.SINUSOIDAL_SPHERE_RADIUS)
+                sin_proj_params.central_meridian = em.item(central_meridian)
+                sin_proj_params.false_easting = em.item(false_easting)
+                sin_proj_params.false_northing = em.item(false_northing)
                 # Add the object to the projection information
-                gm.projection_information.set_sin_proj_params(sin_projection)
+                gm.projection_information.sin_proj_params = sin_proj_params
                 # Update the attribute values
-                gm.projection_information.set_projection("SIN")
-                # This projection doesn't have a datum
-                del gm.projection_information.datum
-                gm.projection_information.datum = None
+                gm.projection_information.attrib['projection'] = 'SIN'
 
         else:
             # Must be Geographic Projection
             logger.info("---- Updating Geographic Parameters")
-            gm.projection_information.set_projection('GEO')
-            gm.projection_information.set_datum(settings.WGS84)  # WGS84 only
-            gm.projection_information.set_units('degrees')  # always degrees
+            gm.projection_information.attrib['projection'] = 'GEO'
+            gm.projection_information.attrib['datum'] = settings.WGS84
+            gm.projection_information.attrib['units'] = 'degrees'
 
         # Fix the UL and LR center of pixel map coordinates
         (map_ul_x, map_ul_y) = convert_imageXY_to_mapXY(0.5, 0.5,
@@ -649,27 +656,27 @@ def update_espa_xml(parms, xml, xml_filename):
         (map_lr_x, map_lr_y) = convert_imageXY_to_mapXY(
             number_of_samples - 0.5, number_of_lines - 0.5, ds_transform)
         for cp in gm.projection_information.corner_point:
-            if cp.location == 'UL':
-                cp.set_x(map_ul_x)
-                cp.set_y(map_ul_y)
-            if cp.location == 'LR':
-                cp.set_x(map_lr_x)
-                cp.set_y(map_lr_y)
+            if cp.attrib['location'] == 'UL':
+                cp.attrib['x'] = str(map_ul_x)
+                cp.attrib['y'] = str(map_ul_y)
+            if cp.attrib['location'] == 'LR':
+                cp.attrib['x'] = str(map_lr_x)
+                cp.attrib['y'] = str(map_lr_y)
 
         # Fix the UL and LR center of pixel latitude and longitude coordinates
         srs_lat_lon = ds_srs.CloneGeogCS()
         coord_tf = osr.CoordinateTransformation(ds_srs, srs_lat_lon)
         for corner in gm.corner:
-            if corner.location == 'UL':
+            if corner.attrib['location'] == 'UL':
                 (lon, lat, height) = \
                     coord_tf.TransformPoint(map_ul_x, map_ul_y)
-                corner.set_longitude(lon)
-                corner.set_latitude(lat)
-            if corner.location == 'LR':
+                corner.attrib['longitude'] = str(lon)
+                corner.attrib['latitude'] = str(lat)
+            if corner.attrib['location'] == 'LR':
                 (lon, lat, height) = \
                     coord_tf.TransformPoint(map_lr_x, map_lr_y)
-                corner.set_longitude(lon)
-                corner.set_latitude(lat)
+                corner.attrib['longitude'] = str(lon)
+                corner.attrib['latitude'] = str(lat)
 
         # Determine the bounding coordinates
         # Initialize using the UL and LR, then walk the edges of the image,
@@ -724,29 +731,14 @@ def update_espa_xml(parms, xml, xml_filename):
             south_lat = min(left_lat, right_lat, south_lat)
 
         # Update the bounding coordinates in the XML
-        bounding_coords = gm.get_bounding_coordinates()
-        bounding_coords.set_west(west_lon)
-        bounding_coords.set_east(east_lon)
-        bounding_coords.set_north(north_lat)
-        bounding_coords.set_south(south_lat)
+        bounding_coordinates = gm.bounding_coordinates
+        bounding_coordinates.west = em.item(west_lon)
+        bounding_coordinates.east = em.item(east_lon)
+        bounding_coordinates.north = em.item(north_lat)
+        bounding_coordinates.south = em.item(south_lat)
 
         del ds_transform
         del ds_srs
-
-        # Write out a new XML file after validation
-        logger.info("---- Validating XML Modifications and"
-                    " Creating Temp Output File")
-        tmp_xml_filename = 'tmp-%s' % xml_filename
-        with open(tmp_xml_filename, 'w') as tmp_fd:
-            # Call the export with validation
-            metadata_api.export(tmp_fd, xml)
-
-        # Remove the original
-        if os.path.exists(xml_filename):
-            os.unlink(xml_filename)
-
-        # Rename the temp file back to the original name
-        os.rename(tmp_xml_filename, xml_filename)
 
     except Exception:
         raise
@@ -797,13 +789,18 @@ def warp_espa_data(parms, scene, xml_filename=None):
     os.chdir(parms['work_directory'])
 
     try:
-        xml = metadata_api.parse(xml_filename, silence=True)
-        bands = xml.get_bands()
-        global_metadata = xml.get_global_metadata()
-        satellite = global_metadata.get_satellite()
+        # Create an element maker
+        em = objectify.ElementMaker(annotate=False,
+                                    namespace=None,
+                                    nsmap=None)
+
+        espa_metadata = Metadata()
+        espa_metadata.parse(xml_filename)
+        bands = espa_metadata.xml_object.bands
+        satellite = espa_metadata.xml_object.global_metadata.satellite
 
         # Might need this for the base warp command image extents
-        original_proj4 = get_original_projection(bands.band[0].get_file_name())
+        original_proj4 = get_original_projection(str(bands.band[0].file_name))
 
         # Build the base warp command to use
         base_warp_command = \
@@ -816,7 +813,7 @@ def warp_espa_data(parms, scene, xml_filename=None):
 
         # Process through the bands in the XML file
         for band in bands.band:
-            img_filename = band.get_file_name()
+            img_filename = str(band.file_name)
             hdr_filename = img_filename.replace('.img', '.hdr')
             logger.info("Processing %s" % img_filename)
 
@@ -824,18 +821,17 @@ def warp_espa_data(parms, scene, xml_filename=None):
             resample_method = user_resample_method
 
             # Always use near for qa bands
-            category = band.get_category()
-            if category == 'qa':
+            if band.attrib['category'] == 'qa':
                 resample_method = 'near'  # over-ride with 'near'
 
             # Update the XML metadata object for the resampling method used
             # Later update_espa_xml is used to update the XML file
             if resample_method == 'near':
-                band.set_resample_method('nearest neighbor')
+                band.resample_method = em.item('nearest neighbor')
             if resample_method == 'bilinear':
-                band.set_resample_method('bilinear')
+                band.resample_method = em.item('bilinear')
             if resample_method == 'cubic':
-                band.set_resample_method('cubic convolution')
+                band.resample_method = em.item('cubic convolution')
 
             # Figure out the pixel size to use
             pixel_size = parms['pixel_size']
@@ -844,11 +840,11 @@ def warp_espa_data(parms, scene, xml_filename=None):
             #    - If the band is (Landsat 7 or 8) and Band 8 do not resize
             #      the pixels.
             if ((satellite == 'LANDSAT_7' or satellite == 'LANDSAT_8') and
-                    band.get_name() == 'band8'):
+                    band.attrib['name'] == 'band8'):
                 if parms['target_projection'] == 'lonlat':
                     pixel_size = settings.DEG_FOR_15_METERS
                 else:
-                    pixel_size = float(band.pixel_size.x)
+                    pixel_size = float(band.pixel_size.attrib['x'])
 
             # Open the image to read the no data value out since the internal
             # ENVI driver for GDAL does not output it, even if it is known
@@ -929,9 +925,15 @@ def warp_espa_data(parms, scene, xml_filename=None):
             os.rename(tmp_hdr_filename, hdr_filename)
 
         # Update the XML to reflect the new warped output
-        update_espa_xml(parms, xml, xml_filename)
+        update_espa_xml(parms, espa_metadata)
 
-        del xml
+        # Validate the XML
+        espa_metadata.validate()
+
+        # Write it to the XML file
+        espa_metadata.write(xml_filename=xml_filename)
+
+        del espa_metadata
 
     finally:
         # Change back to the previous directory
