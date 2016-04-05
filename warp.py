@@ -16,7 +16,7 @@ from osgeo import gdal, osr
 import numpy as np
 
 
-from espa import MetadataError, Metadata
+from espa import Metadata
 
 
 import settings
