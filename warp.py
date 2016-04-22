@@ -511,20 +511,25 @@ def update_espa_xml(parms, espa_metadata):
 
                 # Build the coverages component
                 percent_coverage = em.percent_coverage()
-                cover = em.cover()
-                cover.attrib['clear'] = clear_percent
+
+                cover = em.cover(clear_percent)
+                cover.attrib['type'] = 'clear'
                 percent_coverage.append(cover)
-                cover = em.cover()
-                cover.attrib['water'] = water_percent
+
+                cover = em.cover(water_percent)
+                cover.attrib['type'] = 'water'
                 percent_coverage.append(cover)
-                cover = em.cover()
-                cover.attrib['cloud_shadow'] = cs_percent
+
+                cover = em.cover(cs_percent)
+                cover.attrib['type'] = 'cloud_shadow'
                 percent_coverage.append(cover)
-                cover = em.cover()
-                cover.attrib['snow'] = snow_percent
+
+                cover = em.cover(snow_percent)
+                cover.attrib['type'] = 'snow'
                 percent_coverage.append(cover)
-                cover = em.cover()
-                cover.attrib['cloud'] = cloud_percent
+
+                cover = em.cover(cloud_percent)
+                cover.attrib['type'] = 'cloud'
                 percent_coverage.append(cover)
 
                 # Apply the coverages to the XML
