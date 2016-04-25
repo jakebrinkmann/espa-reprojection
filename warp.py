@@ -547,7 +547,8 @@ def update_espa_xml(parms, espa_metadata):
         # meaningless so just remove it
         # We don't have any way to calculate a new one
         if parms['image_extents']:
-            gm.remove(gm.scene_center_time)
+            if 'scene_center_time' in gm:
+                gm.remove(gm.scene_center_time)
 
         # Find the projection parameter object from the structure so that it
         # can be replaced with the new one
