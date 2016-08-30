@@ -543,6 +543,14 @@ def update_espa_xml(parms, espa_metadata):
         ######################################################################
         gm = espa_metadata.xml_object.global_metadata
 
+        # Determine whether the scene uses lonlat projection and crosses the 
+        # antimeridian 
+        antimeridian_crossing = 0
+        if (parms['target_projection'] == 'lonlat' and
+            gm.bounding_coordinates.east > 90 and 
+            gm.bounding_coordinates.west < -90):
+            antimeridian_crossing = 1
+
         # If the image extents were changed, then the scene center time is
         # meaningless so just remove it
         # We don't have any way to calculate a new one
@@ -666,6 +674,19 @@ def update_espa_xml(parms, espa_metadata):
                                                         ds_transform)
         (map_lr_x, map_lr_y) = convert_imageXY_to_mapXY(
             number_of_samples - 0.5, number_of_lines - 0.5, ds_transform)
+
+        # Keep the corner longitudes in the -180..180 range.  GDAL can report 
+        # corners outside the range in antimeridian crossing cases. 
+        if antimeridian_crossing == 1:
+            if map_ul_x > 180:
+                map_ul_x -= 360
+            if map_lr_x > 180:
+                map_lr_x -= 360
+            if map_ul_x < -180:
+                map_ul_x += 360
+            if map_lr_x < -180:
+                map_lr_x += 360
+
         for cp in gm.projection_information.corner_point:
             if cp.attrib['location'] == 'UL':
                 cp.attrib['x'] = str(map_ul_x)
@@ -681,11 +702,27 @@ def update_espa_xml(parms, espa_metadata):
             if corner.attrib['location'] == 'UL':
                 (lon, lat, height) = \
                     coord_tf.TransformPoint(map_ul_x, map_ul_y)
+
+                # Keep the corner longitudes in the -180..180 range.
+                if antimeridian_crossing == 1:
+                    if lon > 180:
+                        lon -= 360
+                    if lon < -180:
+                        lon += 360
+
                 corner.attrib['longitude'] = str(lon)
                 corner.attrib['latitude'] = str(lat)
             if corner.attrib['location'] == 'LR':
                 (lon, lat, height) = \
                     coord_tf.TransformPoint(map_lr_x, map_lr_y)
+
+                # Keep the corner longitudes in the -180..180 range.
+                if antimeridian_crossing == 1:
+                    if lon > 180:
+                        lon -= 360
+                    if lon < -180:
+                        lon += 360
+
                 corner.attrib['longitude'] = str(lon)
                 corner.attrib['latitude'] = str(lat)
 
@@ -740,6 +777,19 @@ def update_espa_xml(parms, espa_metadata):
             east_lon = max(left_lon, right_lon, east_lon)
             north_lat = max(left_lat, right_lat, north_lat)
             south_lat = min(left_lat, right_lat, south_lat)
+
+        # Fix the bounding coordinates if they are outside the valid range,
+        # which can happen in antimeridian crossing cases
+        if antimeridian_crossing == 1:
+            if west_lon < -180:
+                west_lon += 360
+            if east_lon > 180:
+                east_lon -= 360
+            if east_lon < west_lon:
+                # Swap the east and west values.
+                temp_lon = east_lon
+                east_lon = west_lon
+                west_lon = temp_lon
 
         # Update the bounding coordinates in the XML
         old_bounding_coordinates = gm.bounding_coordinates
@@ -811,6 +861,8 @@ def warp_espa_data(parms, scene, xml_filename=None):
         espa_metadata.parse(xml_filename)
         bands = espa_metadata.xml_object.bands
         satellite = espa_metadata.xml_object.global_metadata.satellite
+        bounding_coordinates = \
+            espa_metadata.xml_object.global_metadata.bounding_coordinates
 
         # Might need this for the base warp command image extents
         original_proj4 = get_original_projection(str(bands.band[0].file_name))
@@ -818,6 +870,12 @@ def warp_espa_data(parms, scene, xml_filename=None):
         # Build the base warp command to use
         base_warp_command = \
             build_base_warp_command(parms, original_proj4=str(original_proj4))
+
+        # Use the CENTER_LONG gdalwarp configuration setting if using 
+        # geographic projection and crossing the antimeridian
+        if (parms['target_projection'] == 'lonlat' and
+            bounding_coordinates.east > 90 and bounding_coordinates.west < -90):
+            base_warp_command.extend(['--config', 'CENTER_LONG', '180'])
 
         # Determine the user specified resample method
         user_resample_method = 'near'  # default
