@@ -1081,31 +1081,31 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
                 output = utilities.execute_cmd(cmd)
 
                 # Rename the XML file back to *.xml from *_hdf.xml
-                meta_hdf_name = metadata_filename.replace('.xml', '_hdf.xml')
+                meta_name = metadata_filename.replace('.xml', '_hdf.xml')
 
-                os.rename(meta_hdf_name, metadata_filename)
+                os.rename(meta_name, metadata_filename)
             finally:
                 if len(output) > 0:
                     logger.info(output)
 
-        # Convert from our internal ESPA/ENVI format to ENVI-BIP
-        elif input_format == 'envi' and output_format == 'envi-bip':
-            # convert_espa_to_bip
-            bip_name = metadata_filename.replace('.xml', '.img')
+        # Convert from our internal ESPA/ENVI format to NetCDF
+        elif input_format == 'envi' and output_format == 'netcdf':
+            # convert_espa_to_netcdf
+            netcdf_name = metadata_filename.replace('.xml', '.nc')
             # Call with deletion of source files
-            cmd = ' '.join(['convert_espa_to_bip',
-                            '--del_src_files', '--convert_qa',
+            cmd = ' '.join(['convert_espa_to_netcdf',
+                            '--del_src_files',
                             '--xml', metadata_filename,
-                            '--bip', bip_name])
+                            '--netcdf', netcdf_name])
 
             output = ''
             try:
                 output = utilities.execute_cmd(cmd)
 
-                # Rename the XML file back to *.xml from *_hdf.xml
-                meta_hdf_name = metadata_filename.replace('.xml', '_hdf.xml')
+                # Rename the XML file back to *.xml from *_nc.xml
+                meta_name = metadata_filename.replace('.xml', '_nc.xml')
 
-                os.rename(meta_hdf_name, metadata_filename)
+                os.rename(meta_name, metadata_filename)
             finally:
                 if len(output) > 0:
                     logger.info(output)
