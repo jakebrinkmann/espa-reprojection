@@ -547,8 +547,8 @@ def update_espa_xml(parms, espa_metadata):
         # antimeridian 
         antimeridian_crossing = 0
         if (parms['target_projection'] == 'lonlat' and
-            gm.bounding_coordinates.east > 90 and 
-            gm.bounding_coordinates.west < -90):
+            gm.bounding_coordinates.east < 0 and
+            gm.bounding_coordinates.west > 0):
             antimeridian_crossing = 1
 
         # If the image extents were changed, then the scene center time is
@@ -785,11 +785,6 @@ def update_espa_xml(parms, espa_metadata):
                 west_lon += 360
             if east_lon > 180:
                 east_lon -= 360
-            if east_lon < west_lon:
-                # Swap the east and west values.
-                temp_lon = east_lon
-                east_lon = west_lon
-                west_lon = temp_lon
 
         # Update the bounding coordinates in the XML
         old_bounding_coordinates = gm.bounding_coordinates
@@ -874,7 +869,7 @@ def warp_espa_data(parms, scene, xml_filename=None):
         # Use the CENTER_LONG gdalwarp configuration setting if using 
         # geographic projection and crossing the antimeridian
         if (parms['target_projection'] == 'lonlat' and
-            bounding_coordinates.east > 90 and bounding_coordinates.west < -90):
+            bounding_coordinates.east < 0 and bounding_coordinates.west > 0):
             base_warp_command.extend(['--config', 'CENTER_LONG', '180'])
 
         # Determine the user specified resample method
