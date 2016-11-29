@@ -866,7 +866,7 @@ def warp_espa_data(parms, scene, xml_filename=None):
         base_warp_command = \
             build_base_warp_command(parms, original_proj4=str(original_proj4))
 
-        # Use the CENTER_LONG gdalwarp configuration setting if using 
+        # Use the CENTER_LONG gdalwarp configuration setting if using
         # geographic projection and crossing the antimeridian
         if (parms['target_projection'] == 'lonlat' and
             bounding_coordinates.east < 0 and bounding_coordinates.west > 0):
@@ -906,7 +906,7 @@ def warp_espa_data(parms, scene, xml_filename=None):
             #    - If the band is (Landsat 7 or 8) and Band 8 do not resize
             #      the pixels.
             if ((satellite == 'LANDSAT_7' or satellite == 'LANDSAT_8') and
-                    band.attrib['name'] == 'band8'):
+                    band.attrib['name'] == 'b8'):
                 if parms['target_projection'] == 'lonlat':
                     pixel_size = settings.DEG_FOR_15_METERS
                 else:
