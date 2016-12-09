@@ -1113,3 +1113,11 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
     finally:
         # Change back to the previous directory
         os.chdir(current_directory)
+
+
+def main():
+    pass
+
+
+if __name__ == '__main__':
+    main()
