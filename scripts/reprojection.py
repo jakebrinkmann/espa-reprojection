@@ -1,3 +1,4 @@
+#! /usr/bin/env python
 
 '''
 Description: Alters product extents, projections and pixel sizes.
@@ -8,9 +9,10 @@ License: NASA Open Source Agreement 1.3
 import os
 import sys
 import glob
+from argparse import ArgumentParser
+"""
 import copy
 from cStringIO import StringIO
-from argparse import ArgumentParser
 from lxml import objectify as objectify
 from osgeo import gdal, osr
 import numpy as np
@@ -24,8 +26,280 @@ import utilities
 from logging_tools import EspaLogging
 from espa_exception import ESPAException
 import parameters
+"""
 
 
+VERSION = 'Reprojection 1.0.0'
+
+def retrieve_command_line_arguments():
+    """Read arguments from the command line
+
+    Returns:
+        <args>: The arguments read from the command line
+    """
+
+    description = ('Reproject the data defined in the ESPA Raw Binary'
+                   ' Format to the specified projection')
+
+    parser = ArgumentParser(description=description)
+
+    parser.add_argument('--xml',
+                        action='store',
+                        dest='xml_filename',
+                        required=True,
+                        metavar='FILE',
+                        help='The XML metadata file to use')
+
+    parser.add_argument('--version',
+                        action='version',
+                        version=VERSION)
+
+    custom = parser.add_argument_group('customization arguments')
+
+    custom.add_argument('--resample-method',
+                        action='store',
+                        dest='resample_method',
+                        choices=['near', 'bilinear', 'cubic',
+                                 'cubicspline', 'lanczos'],
+                        default='near',
+                        help='Resampling method to use')
+
+    custom.add_argument('--pixel-size',
+                        action='store',
+                        dest='pixel_size',
+                        default=None,
+                        metavar='FLOAT',
+                        type=float,
+                        help='Pixel size for the output product')
+
+    custom.add_argument('--pixel-size-units',
+                        action='store',
+                        dest='pixel_size_units',
+                        choices=['meters', 'dd'],
+                        default=None,
+                        help='Units for the pixel size')
+
+    custom.add_argument('--extent-minx',
+                        action='store',
+                        dest='extent_minx',
+                        default=None,
+                        metavar='FLOAT',
+                        type=float,
+                        help='Minimum X direction extent value')
+
+    custom.add_argument('--extent-maxx',
+                        action='store',
+                        dest='extent_maxx',
+                        default=None,
+                        metavar='FLOAT',
+                        type=float,
+                        help='Maximum X direction extent value')
+
+    custom.add_argument('--extent-miny',
+                        action='store',
+                        dest='extent_miny',
+                        default=None,
+                        metavar='FLOAT',
+                        type=float,
+                        help='Minimum Y direction extent value')
+
+    custom.add_argument('--extent-maxy',
+                        action='store',
+                        dest='extent_maxy',
+                        default=None,
+                        metavar='FLOAT',
+                        type=float,
+                        help='Maximum Y direction extent value')
+
+    custom.add_argument('--extent-units',
+                        action='store',
+                        dest='extent_units',
+                        choices=['meters', 'dd'],
+                        default='meters',
+                        help='Units for the extent')
+
+    custom.add_argument('--debug',
+                        action='store_true',
+                        dest='debug',
+                        default=False,
+                        help='display error information')
+
+    subparsers = parser.add_subparsers(dest='projection')
+
+    # ---------------------------------
+    description = 'PROJ4 Projection String'
+    sub_p = subparsers.add_parser('proj4',
+                                  description=description,
+                                  help=description)
+
+    sub_p.add_argument('proj4_string',
+                       action='store',
+                       default=None,
+                       metavar='<proj4 string>',
+                       help='Specify the projection using a proj4 string')
+
+    # ---------------------------------
+    description = 'UTM Projection'
+    sub_p = subparsers.add_parser('utm',
+                                  description=description,
+                                  help=description)
+
+    sub_p.add_argument('--north-south',
+                       action='store',
+                       dest='north_south',
+                       choices=['north', 'south'],
+                       default=None,
+                       help='UTM North or South')
+
+    sub_p.add_argument('--zone',
+                       action='store',
+                       dest='zone',
+                       default=None,
+                       metavar='INT',
+                       type=int,
+                       help='UTM Zone value')
+
+    # ---------------------------------
+    description = 'Sinusoidal Projection'
+    sub_p = subparsers.add_parser('sinu',
+                                  description=description,
+                                  help=description)
+
+    sub_p.add_argument('--central-meridian',
+                       action='store',
+                       dest='central_meridian',
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='Central Meridian reprojection value')
+
+    sub_p.add_argument('--false-easting',
+                       action='store',
+                       dest='false_easting',
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='False Easting reprojection value')
+
+    sub_p.add_argument('--false-northing',
+                       action='store',
+                       dest='false_northing',
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='False Northing reprojection value')
+
+    # ---------------------------------
+    description = 'Albers Equal Area Projection'
+    sub_p = subparsers.add_parser('aea',
+                                  description=description,
+                                  help=description)
+
+    sub_p.add_argument('--central-meridian',
+                       action='store',
+                       dest='central_meridian',
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='Central Meridian reprojection value')
+
+    sub_p.add_argument('--std-parallel-1',
+                       action='store',
+                       dest='std_parallel_1',
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='Standard Parallel 1 reprojection value')
+
+    sub_p.add_argument('--std-parallel-2',
+                       action='store',
+                       dest='std_parallel_2',
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='Standard Parallel 2 reprojection value')
+
+    sub_p.add_argument('--origin-latitude',
+                       action='store',
+                       dest='origin_latitude',
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='Origin Latitude reprojection value')
+
+    sub_p.add_argument('--false-easting',
+                       action='store',
+                       dest='false_easting',
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='False Easting reprojection value')
+
+    sub_p.add_argument('--false-northing',
+                       action='store',
+                       dest='false_northing',
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='False Northing reprojection value')
+
+    # ---------------------------------
+    description = 'Polar-Stereographic Projection'
+    sub_p = subparsers.add_parser('ps',
+                                  description=description,
+                                  help=description)
+
+    sub_p.add_argument('--latitude-true-scale',
+                       action='store',
+                       dest='latitude_true_scale',
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='Latitude True Scale reprojection value')
+
+    sub_p.add_argument('--longitude-pole',
+                       action='store',
+                       dest='longitude_pole',
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='Longitude Pole reprojection value')
+
+    sub_p.add_argument('--origin-latitude',
+                       action='store',
+                       dest='origin_latitude',
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='Origin Latitude reprojection value')
+
+    sub_p.add_argument('--false-easting',
+                       action='store',
+                       dest='false_easting',
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='False Easting reprojection value')
+
+    sub_p.add_argument('--false-northing',
+                       action='store',
+                       dest='false_northing',
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='False Northing reprojection value')
+
+    # ---------------------------------
+    description = 'Geographic Projection'
+    sub_p = subparsers.add_parser('lonlat',
+                                  description=description,
+                                  help=description)
+
+    args = parser.parse_args()
+
+    return args
+
+"""
 def build_sinu_proj4_string(central_meridian, false_easting, false_northing):
     '''
     Description:
@@ -1113,9 +1387,10 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
     finally:
         # Change back to the previous directory
         os.chdir(current_directory)
-
+"""
 
 def main():
+    args = retrieve_command_line_arguments()
     pass
 
 
