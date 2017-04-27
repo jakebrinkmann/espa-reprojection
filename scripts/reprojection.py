@@ -9,19 +9,20 @@ License: NASA Open Source Agreement 1.3
 import os
 import sys
 import glob
-from argparse import ArgumentParser
-"""
+import logging
 import copy
-from cStringIO import StringIO
+import subprocess
+from argparse import ArgumentParser
+
 from lxml import objectify as objectify
 from osgeo import gdal, osr
 import numpy as np
 
-
 from espa import Metadata
+from cStringIO import StringIO
 
 
-import settings
+"""
 import utilities
 from logging_tools import EspaLogging
 from espa_exception import ESPAException
@@ -31,39 +32,109 @@ import parameters
 
 VERSION = 'Reprojection 1.0.0'
 
-def retrieve_command_line_arguments():
-    """Read arguments from the command line
 
-    Returns:
-        <args>: The arguments read from the command line
+# We are only supporting one radius when warping to sinusoidal
+SINUSOIDAL_SPHERE_RADIUS = 6371007.181
+
+# We do not allow any user selectable choices for this projection
+GEOGRAPHIC_PROJ4_STRING = '+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs'
+
+# Some defines for common pixels sizes in decimal degrees
+DEG_FOR_30_METERS = 0.0002695
+DEG_FOR_15_METERS = (DEG_FOR_30_METERS / 2.0)
+DEG_FOR_1_METER = (DEG_FOR_30_METERS / 30.0)
+
+# Supported datums - the strings for them
+WGS84 = 'WGS84'
+NAD27 = 'NAD27'
+NAD83 = 'NAD83'
+# WGS84 should always be first in the list
+VALID_DATUMS = [WGS84, NAD27, NAD83]
+
+
+logger = None
+
+
+class LoggingFilter(logging.Filter):
+    """Forces 'ESPA' to be provided in the 'subsystem' tag of the log format
+       string
     """
 
-    description = ('Reproject the data defined in the ESPA Raw Binary'
-                   ' Format to the specified projection')
+    def filter(self, record):
+        """Provide the string for the 'subsystem' tag"""
 
-    parser = ArgumentParser(description=description)
+        record.subsystem = 'ESPA'
 
-    parser.add_argument('--xml',
-                        action='store',
-                        dest='xml_filename',
-                        required=True,
-                        metavar='FILE',
-                        help='The XML metadata file to use')
+        return True
 
-    parser.add_argument('--version',
-                        action='version',
-                        version=VERSION)
 
-    custom = parser.add_argument_group('customization arguments')
+class ExceptionFormatter(logging.Formatter):
+    """Modifies how exceptions are formatted
+    """
 
-    custom.add_argument('--resample-method',
+    def formatException(self, exc_info):
+        """Specifies how to format the exception text"""
+
+        result = super(ExceptionFormatter, self).formatException(exc_info)
+
+        return repr(result)
+
+    def format(self, record):
+        """Specifies how to format the message text if it is an exception"""
+
+        s = super(ExceptionFormatter, self).format(record)
+        if record.exc_text:
+            s = s.replace('\n', ' ')
+            s = s.replace('\\n', ' ')
+
+        return s
+
+
+def setup_logging(args):
+    """Configures the logging/reporting
+
+    Args:
+        args <args>: Command line arguments
+    """
+
+    global logger
+
+    # Setup the logging level
+    logging_level = logging.INFO
+    if args.debug:
+        logging_level = logging.DEBUG
+
+    handler = logging.StreamHandler(sys.stdout)
+    formatter = ExceptionFormatter(fmt=('%(asctime)s.%(msecs)03d'
+                                        ' %(subsystem)s'
+                                        ' %(levelname)-8s'
+                                        ' [%(filename)s:'
+                                        '%(lineno)d]'
+                                        ' %(message)s'),
+                                   datefmt='%Y-%m-%dT%H:%M:%S')
+
+    handler.setFormatter(formatter)
+    handler.addFilter(LoggingFilter())
+
+    logger = logging.getLogger()
+    logger.setLevel(logging_level)
+    logger.addHandler(handler)
+
+
+def bcl_add_customization_arguments(sub_p, required, pixel_units):
+
+    required.add_argument('--resample-method',
                         action='store',
                         dest='resample_method',
+                        required=True,
                         choices=['near', 'bilinear', 'cubic',
                                  'cubicspline', 'lanczos'],
                         default='near',
+                        metavar='TEXT',
+                        type=str,
                         help='Resampling method to use')
 
+    custom = sub_p.add_argument_group('pixel size arguments')
     custom.add_argument('--pixel-size',
                         action='store',
                         dest='pixel_size',
@@ -75,10 +146,13 @@ def retrieve_command_line_arguments():
     custom.add_argument('--pixel-size-units',
                         action='store',
                         dest='pixel_size_units',
-                        choices=['meters', 'dd'],
+                        choices=pixel_units,
                         default=None,
+                        metavar='TEXT',
+                        type=str,
                         help='Units for the pixel size')
 
+    custom = sub_p.add_argument_group('extent arguments')
     custom.add_argument('--extent-minx',
                         action='store',
                         dest='extent_minx',
@@ -115,10 +189,249 @@ def retrieve_command_line_arguments():
                         action='store',
                         dest='extent_units',
                         choices=['meters', 'dd'],
-                        default='meters',
+                        default=None,
+                        metavar='TEXT',
+                        type=str,
                         help='Units for the extent')
 
-    custom.add_argument('--debug',
+    custom = sub_p.add_argument_group('output format arguments')
+    custom.add_argument('--output-format',
+                        action='store',
+                        dest='output_format',
+                        default='envi',
+                        metavar='TEXT',
+                        type=str,
+                        help='output format supported by GDAL')
+
+
+def bcl_add_central_meridian(parser):
+    parser.add_argument('--central-meridian',
+                        action='store',
+                        dest='central_meridian',
+                        required=True,
+                        default=None,
+                        metavar='FLOAT',
+                        type=float,
+                        help='Central Meridian reprojection value')
+
+
+def bcl_add_origin_latitude(parser):
+    parser.add_argument('--origin-latitude',
+                        action='store',
+                        dest='origin_latitude',
+                        required=True,
+                        default=None,
+                        metavar='FLOAT',
+                        type=float,
+                        help='Origin Latitude reprojection value')
+
+
+def bcl_add_datum(parser):
+    parser.add_argument('--datum',
+                        action='store',
+                        dest='datum',
+                        choices=VALID_DATUMS,
+                        required=True,
+                        default=WGS84,
+                        metavar='TEXT',
+                        type=str,
+                        help='Datum to use')
+
+
+def bcl_add_false_easting_northing(parser):
+    parser.add_argument('--false-easting',
+                        action='store',
+                        dest='false_easting',
+                        required=True,
+                        default=None,
+                        metavar='FLOAT',
+                        type=float,
+                        help='False Easting reprojection value')
+
+    parser.add_argument('--false-northing',
+                        action='store',
+                        dest='false_northing',
+                        required=True,
+                        default=None,
+                        metavar='FLOAT',
+                        type=float,
+                        help='False Northing reprojection value')
+
+
+def bcl_add_none(parser):
+    description = 'Only Customization'
+    sub_p = parser.add_parser('none',
+                              description=description,
+                              help=description)
+
+    required = sub_p.add_argument_group('required arguments')
+
+    bcl_add_customization_arguments(sub_p, required, ['meters'])
+
+
+def bcl_add_proj4(parser):
+    description = 'PROJ4 Projection String'
+    sub_p = parser.add_parser('proj4',
+                              description=description,
+                              help=description)
+
+    required = sub_p.add_argument_group('required arguments')
+
+    required.add_argument('--proj4-string',
+                       action='store',
+                       dest='proj4_string',
+                       required=True,
+                       default=None,
+                       metavar='<proj4 string>',
+                       help='Specify the projection using a proj4 string')
+
+    bcl_add_customization_arguments(sub_p, required, ['meters', 'dd'])
+
+
+def bcl_add_lonlat(parser):
+    description = 'Geographic Projection'
+    sub_p = parser.add_parser('lonlat',
+                              description=description,
+                              help=description)
+
+    required = sub_p.add_argument_group('required arguments')
+
+    bcl_add_customization_arguments(sub_p, required, ['dd'])
+
+
+def bcl_add_utm(parser):
+    description = 'UTM Projection'
+    sub_p = parser.add_parser('utm',
+                              description=description,
+                              help=description)
+
+    required = sub_p.add_argument_group('required arguments')
+
+    required.add_argument('--north-south',
+                       action='store',
+                       dest='north_south',
+                       required=True,
+                       choices=['north', 'south'],
+                       default=None,
+                       type=str,
+                       help='UTM North or South')
+
+    required.add_argument('--zone',
+                       action='store',
+                       dest='zone',
+                       required=True,
+                       default=None,
+                       metavar='INT',
+                       type=int,
+                       help='UTM Zone value')
+
+    bcl_add_customization_arguments(sub_p, required, ['meters'])
+
+
+def bcl_add_sinu(parser):
+    description = 'Sinusoidal Projection'
+    sub_p = parser.add_parser('sinu',
+                              description=description,
+                              help=description)
+
+    required = sub_p.add_argument_group('required arguments')
+
+    bcl_add_central_meridian(required)
+    bcl_add_false_easting_northing(required)
+    bcl_add_customization_arguments(sub_p, required, ['meters'])
+
+
+def bcl_add_aea(parser):
+    # ---------------------------------
+    description = 'Albers Equal Area Projection'
+    sub_p = parser.add_parser('aea',
+                              description=description,
+                              help=description)
+
+    required = sub_p.add_argument_group('required arguments')
+
+    bcl_add_central_meridian(required)
+
+    required.add_argument('--std-parallel-1',
+                       action='store',
+                       dest='std_parallel_1',
+                       required=True,
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='Standard Parallel 1 reprojection value')
+
+    required.add_argument('--std-parallel-2',
+                       action='store',
+                       dest='std_parallel_2',
+                       required=True,
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='Standard Parallel 2 reprojection value')
+
+    bcl_add_origin_latitude(required)
+    bcl_add_false_easting_northing(required)
+    bcl_add_datum(required)
+    bcl_add_customization_arguments(sub_p, required, ['meters'])
+
+
+def bcl_add_ps(parser):
+    # ---------------------------------
+    description = 'Polar-Stereographic Projection'
+    sub_p = parser.add_parser('ps',
+                              description=description,
+                              help=description)
+
+    required = sub_p.add_argument_group('required arguments')
+
+    required.add_argument('--latitude-true-scale',
+                       action='store',
+                       dest='latitude_true_scale',
+                       required=True,
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='Latitude True Scale reprojection value')
+
+    required.add_argument('--longitude-pole',
+                       action='store',
+                       dest='longitude_pole',
+                       required=True,
+                       default=None,
+                       metavar='FLOAT',
+                       type=float,
+                       help='Longitude Pole reprojection value')
+
+    bcl_add_origin_latitude(required)
+    bcl_add_false_easting_northing(required)
+    bcl_add_customization_arguments(sub_p, required, ['meters'])
+
+
+def build_command_line_arguments():
+    """Read arguments from the command line
+
+    Returns:
+        <args>: The arguments read from the command line
+    """
+
+    description = ('Reproject the data defined in the ESPA Raw Binary'
+                   ' Format to the specified projection')
+
+    parser = ArgumentParser(description=description)
+
+    parser.add_argument('--xml',
+                        action='store',
+                        dest='xml_filename',
+                        required=True,
+                        metavar='FILE',
+                        help='The XML metadata file to use')
+
+    parser.add_argument('--version',
+                        action='version',
+                        version=VERSION)
+
+    parser.add_argument('--debug',
                         action='store_true',
                         dest='debug',
                         default=False,
@@ -126,225 +439,53 @@ def retrieve_command_line_arguments():
 
     subparsers = parser.add_subparsers(dest='projection')
 
-    # ---------------------------------
-    description = 'PROJ4 Projection String'
-    sub_p = subparsers.add_parser('proj4',
-                                  description=description,
-                                  help=description)
+    bcl_add_none(subparsers)
+    bcl_add_proj4(subparsers)
+    bcl_add_lonlat(subparsers)
+    bcl_add_utm(subparsers)
+    bcl_add_sinu(subparsers)
+    bcl_add_aea(subparsers)
+    bcl_add_ps(subparsers)
 
-    sub_p.add_argument('proj4_string',
-                       action='store',
-                       default=None,
-                       metavar='<proj4 string>',
-                       help='Specify the projection using a proj4 string')
+    return parser
 
-    # ---------------------------------
-    description = 'UTM Projection'
-    sub_p = subparsers.add_parser('utm',
-                                  description=description,
-                                  help=description)
 
-    sub_p.add_argument('--north-south',
-                       action='store',
-                       dest='north_south',
-                       choices=['north', 'south'],
-                       default=None,
-                       help='UTM North or South')
-
-    sub_p.add_argument('--zone',
-                       action='store',
-                       dest='zone',
-                       default=None,
-                       metavar='INT',
-                       type=int,
-                       help='UTM Zone value')
-
-    # ---------------------------------
-    description = 'Sinusoidal Projection'
-    sub_p = subparsers.add_parser('sinu',
-                                  description=description,
-                                  help=description)
-
-    sub_p.add_argument('--central-meridian',
-                       action='store',
-                       dest='central_meridian',
-                       default=None,
-                       metavar='FLOAT',
-                       type=float,
-                       help='Central Meridian reprojection value')
-
-    sub_p.add_argument('--false-easting',
-                       action='store',
-                       dest='false_easting',
-                       default=None,
-                       metavar='FLOAT',
-                       type=float,
-                       help='False Easting reprojection value')
-
-    sub_p.add_argument('--false-northing',
-                       action='store',
-                       dest='false_northing',
-                       default=None,
-                       metavar='FLOAT',
-                       type=float,
-                       help='False Northing reprojection value')
-
-    # ---------------------------------
-    description = 'Albers Equal Area Projection'
-    sub_p = subparsers.add_parser('aea',
-                                  description=description,
-                                  help=description)
-
-    sub_p.add_argument('--central-meridian',
-                       action='store',
-                       dest='central_meridian',
-                       default=None,
-                       metavar='FLOAT',
-                       type=float,
-                       help='Central Meridian reprojection value')
-
-    sub_p.add_argument('--std-parallel-1',
-                       action='store',
-                       dest='std_parallel_1',
-                       default=None,
-                       metavar='FLOAT',
-                       type=float,
-                       help='Standard Parallel 1 reprojection value')
-
-    sub_p.add_argument('--std-parallel-2',
-                       action='store',
-                       dest='std_parallel_2',
-                       default=None,
-                       metavar='FLOAT',
-                       type=float,
-                       help='Standard Parallel 2 reprojection value')
-
-    sub_p.add_argument('--origin-latitude',
-                       action='store',
-                       dest='origin_latitude',
-                       default=None,
-                       metavar='FLOAT',
-                       type=float,
-                       help='Origin Latitude reprojection value')
-
-    sub_p.add_argument('--false-easting',
-                       action='store',
-                       dest='false_easting',
-                       default=None,
-                       metavar='FLOAT',
-                       type=float,
-                       help='False Easting reprojection value')
-
-    sub_p.add_argument('--false-northing',
-                       action='store',
-                       dest='false_northing',
-                       default=None,
-                       metavar='FLOAT',
-                       type=float,
-                       help='False Northing reprojection value')
-
-    # ---------------------------------
-    description = 'Polar-Stereographic Projection'
-    sub_p = subparsers.add_parser('ps',
-                                  description=description,
-                                  help=description)
-
-    sub_p.add_argument('--latitude-true-scale',
-                       action='store',
-                       dest='latitude_true_scale',
-                       default=None,
-                       metavar='FLOAT',
-                       type=float,
-                       help='Latitude True Scale reprojection value')
-
-    sub_p.add_argument('--longitude-pole',
-                       action='store',
-                       dest='longitude_pole',
-                       default=None,
-                       metavar='FLOAT',
-                       type=float,
-                       help='Longitude Pole reprojection value')
-
-    sub_p.add_argument('--origin-latitude',
-                       action='store',
-                       dest='origin_latitude',
-                       default=None,
-                       metavar='FLOAT',
-                       type=float,
-                       help='Origin Latitude reprojection value')
-
-    sub_p.add_argument('--false-easting',
-                       action='store',
-                       dest='false_easting',
-                       default=None,
-                       metavar='FLOAT',
-                       type=float,
-                       help='False Easting reprojection value')
-
-    sub_p.add_argument('--false-northing',
-                       action='store',
-                       dest='false_northing',
-                       default=None,
-                       metavar='FLOAT',
-                       type=float,
-                       help='False Northing reprojection value')
-
-    # ---------------------------------
-    description = 'Geographic Projection'
-    sub_p = subparsers.add_parser('lonlat',
-                                  description=description,
-                                  help=description)
-
-    args = parser.parse_args()
-
-    return args
-
-"""
-def build_sinu_proj4_string(central_meridian, false_easting, false_northing):
-    '''
-    Description:
-      Builds a proj.4 string for MODIS
-      SR-ORG:6842 Is one of the MODIS spatial reference codes
+def build_sinu_proj4_string(args):
+    """Builds a proj.4 string for sinusoidal
 
     Example:
       +proj=sinu +lon_0=0 +x_0=0 +y_0=0 +a=6371007.181 +b=6371007.181
       +ellps=WGS84 +datum=WGS84 +units=m +no_defs
-    '''
+    """
 
-    proj4_string = ("+proj=sinu +lon_0=%f +x_0=%f +y_0=%f +a=%f +b=%f"
-                    " +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
-                    % (central_meridian, false_easting, false_northing,
-                       settings.SINUSOIDAL_SPHERE_RADIUS,
-                       settings.SINUSOIDAL_SPHERE_RADIUS))
+    projection = ('+proj=sinu +lon_0={0} +x_0={1} +y_0={2} +a={3} +b={3}'
+                  ' +ellps=WGS84 +datum=WGS84 +units=m +no_defs'
+                  .format(args.central_meridian, args.false_easting,
+                          args.false_northing, SINUSOIDAL_SPHERE_RADIUS))
 
-    return proj4_string
+    return projection
 
 
-def build_albers_proj4_string(std_parallel_1, std_parallel_2, origin_lat,
-                              central_meridian, false_easting, false_northing,
-                              datum):
-    '''
-    Description:
-      Builds a proj.4 string for albers equal area
+def build_albers_proj4_string(args):
+    """Builds a proj.4 string for albers equal area
 
     Example:
       +proj=aea +lat_1=20 +lat_2=60 +lat_0=40 +lon_0=-96 +x_0=0 +y_0=0
       +ellps=GRS80 +datum=NAD83 +units=m +no_defs
-    '''
+    """
 
-    proj4_string = ("+proj=aea +lat_1=%f +lat_2=%f +lat_0=%f +lon_0=%f"
-                    " +x_0=%f +y_0=%f +ellps=GRS80 +datum=%s +units=m"
-                    " +no_defs"
-                    % (std_parallel_1, std_parallel_2, origin_lat,
-                       central_meridian, false_easting, false_northing, datum))
+    projection = ('+proj=aea +lat_1={0} +lat_2={1} +lat_0={2} +lon_0={3}'
+                  ' +x_0={4} +y_0={5} +ellps=GRS80 +datum={6} +units=m +no_defs'
+                  .format(args.std_parallel_1, args.std_parallel_2,
+                          args.origin_latitude, args.central_meridian,
+                          args.false_easting, args.false_northing,
+                          args.datum))
 
-    return proj4_string
+    return projection
 
 
-def build_utm_proj4_string(utm_zone, utm_north_south):
-    '''
-    Description:
-      Builds a proj.4 string for utm
+def build_utm_proj4_string(args):
+    """Builds a proj.4 string for utm
 
     Note:
       The ellipsoid probably doesn't need to be specified.
@@ -355,25 +496,20 @@ def build_utm_proj4_string(utm_zone, utm_north_south):
 
       #### gdalsrsinfo EPSG:32739
       +proj=utm +zone=39 +south +ellps=WGS84 +datum=WGS84 +units=m +no_defs
-    '''
+    """
 
-    proj4_string = ''
-    if str(utm_north_south).lower() == 'north':
-        proj4_string = ("+proj=utm +zone=%i +ellps=WGS84 +datum=WGS84"
-                        " +units=m +no_defs" % utm_zone)
-    elif str(utm_north_south).lower() == 'south':
-        proj4_string = ("+proj=utm +zone=%i +south +ellps=WGS84 +datum=WGS84"
-                        " +units=m +no_defs" % utm_zone)
+    projection = ''
+    if args.north_south == 'north':
+        projection = ('+proj=utm +zone={} +ellps=WGS84 +datum=WGS84'
+                      ' +units=m +no_defs'.format(args.zone))
     else:
-        raise ValueError("Invalid utm_north_south argument[%s]"
-                         " Argument must be one of 'north' or 'south'"
-                         % utm_north_south)
+        projection = ('+proj=utm +zone={} +south +ellps=WGS84 +datum=WGS84'
+                      ' +units=m +no_defs'.format(args.zone))
 
-    return proj4_string
+    return projection
 
 
-def build_ps_proj4_string(lat_ts, lon_pole, origin_lat,
-                          false_easting, false_northing):
+def build_ps_proj4_string(args):
     '''
     Description:
       Builds a proj.4 string for polar stereographic
@@ -387,15 +523,16 @@ def build_ps_proj4_string(lat_ts, lon_pole, origin_lat,
         +datum=WGS84 +units=m +no_defs
     '''
 
-    proj4_string = ("+proj=stere +lat_ts=%f +lat_0=%f +lon_0=%f +k_0=1.0"
-                    " +x_0=%f +y_0=%f +datum=WGS84 +units=m +no_defs"
-                    % (lat_ts, origin_lat, lon_pole,
-                       false_easting, false_northing))
+    projection = ('+proj=stere +lat_ts={0} +lat_0={1} +lon_0={2} +k_0=1.0'
+                  ' +x_0={3} +y_0={4} +datum=WGS84 +units=m +no_defs'
+                  .format(args.latitude_true_scale, args.origin_latitude,
+                          args.longitude_pole, args.false_easting,
+                          args.false_northing))
 
-    return proj4_string
+    return projection
 
 
-def convert_target_projection_to_proj4(parms):
+def convert_target_projection_to_proj4(args):
     '''
     Description:
       Checks to see if the reproject parameter was set.  If set the
@@ -404,46 +541,30 @@ def convert_target_projection_to_proj4(parms):
     '''
 
     projection = None
-    target_projection = None
 
-    target_projection = parms['target_projection']
+    if args.projection == "sinu":
+        projection = build_sinu_proj4_string(args)
 
-    if target_projection == "sinu":
-        projection = \
-            build_sinu_proj4_string(parms['central_meridian'],
-                                    parms['false_easting'],
-                                    parms['false_northing'])
+    elif args.projection == "aea":
+        projection = build_albers_proj4_string(args)
 
-    elif target_projection == "aea":
-        projection = \
-            build_albers_proj4_string(parms['std_parallel_1'],
-                                      parms['std_parallel_2'],
-                                      parms['origin_lat'],
-                                      parms['central_meridian'],
-                                      parms['false_easting'],
-                                      parms['false_northing'],
-                                      parms['datum'])
+    elif args.projection == "utm":
+        projection = build_utm_proj4_string(args)
 
-    elif target_projection == "utm":
-        projection = \
-            build_utm_proj4_string(parms['utm_zone'],
-                                   parms['utm_north_south'])
+    elif args.projection == "ps":
+        projection = build_ps_proj4_string(args)
 
-    elif target_projection == "ps":
-        projection = build_ps_proj4_string(parms['latitude_true_scale'],
-                                           parms['longitude_pole'],
-                                           parms['origin_lat'],
-                                           parms['false_easting'],
-                                           parms['false_northing'])
-
-    elif target_projection == "lonlat":
-        projection = settings.GEOGRAPHIC_PROJ4_STRING
+    elif args.projection == "lonlat":
+        projection = GEOGRAPHIC_PROJ4_STRING
 
     return str(projection)
 
 
-def projection_minbox(ul_lon, ul_lat, lr_lon, lr_lat,
-                      target_proj4, pixel_size, pixel_size_units):
+class TransformPointError(Exception):
+    pass
+
+
+def projection_minbox(args, target_proj4):
     '''
     Description:
       Determines the minimum box in map coordinates that contains the
@@ -464,15 +585,13 @@ def projection_minbox(ul_lon, ul_lat, lr_lon, lr_lat,
         (min_x, min_y, max_x, max_y) in meters
     '''
 
-    logger = EspaLogging.get_logger(settings.PROCESSING_LOGGER)
-
-    logger.info("Determining Image Extents For Requested Projection")
+    logger.debug('Determining Image Extents For Requested Projection')
 
     # We are always going to be geographic
-    source_proj4 = settings.GEOGRAPHIC_PROJ4_STRING
+    source_proj4 = GEOGRAPHIC_PROJ4_STRING
 
-    logger.info("Using source projection [%s]" % source_proj4)
-    logger.info("Using target projection [%s]" % target_proj4)
+    logger.debug('Using source projection [{}]'.format(source_proj4))
+    logger.debug('Using target projection [{}]'.format(target_proj4))
 
     # Create and initialize the source SRS
     source_srs = osr.SpatialReference()
@@ -486,35 +605,45 @@ def projection_minbox(ul_lon, ul_lat, lr_lon, lr_lat,
     transform = osr.CoordinateTransformation(source_srs, target_srs)
 
     # Determine the step in decimal degrees
-    step = pixel_size
-    if pixel_size_units == 'meters':
+    step = args.pixel_size
+    if args.pixel_size_units == 'meters':
         # Convert it to decimal degrees
-        step = settings.DEG_FOR_1_METER * pixel_size
+        step = DEG_FOR_1_METER * args.pixel_size
 
     # Determine the lat and lon values to iterate over
-    longitudes = np.arange(ul_lon, lr_lon, step, np.float)
-    latitudes = np.arange(lr_lat, ul_lat, step, np.float)
+    longitudes = np.arange(args.extent_minx, args.extent_maxx, step, np.float)
+    latitudes = np.arange(args.extent_miny, args.extent_maxy, step, np.float)
 
     # Initialization using the two corners
-    (ul_x, ul_y, z) = transform.TransformPoint(ul_lon, ul_lat)
-    (lr_x, lr_y, z) = transform.TransformPoint(lr_lon, lr_lat)
+    (ul_x, ul_y, z) = transform.TransformPoint(args.extent_minx,
+                                               args.extent_maxy)
+    if ul_x < 1.0 or ul_y < 1.0:
+        raise TransformPointError('Error transforming point')
+    (lr_x, lr_y, z) = transform.TransformPoint(args.extent_maxx,
+                                               args.extent_miny)
+    if lr_x < 1.0 or lr_y < 1.0:
+        raise TransformPointError('Error transforming point')
 
     min_x = min(ul_x, lr_x)
     max_x = max(ul_x, lr_x)
     min_y = min(ul_y, lr_y)
     max_y = max(ul_y, lr_y)
 
-    logger.info('Direct translation of the provided geographic coordinates')
-    logger.info(','.join(['min_x', 'min_y', 'max_x', 'max_y']))
-    logger.info(','.join([str(min_x), str(min_y), str(max_x), str(max_y)]))
+    logger.debug('Direct translation of the provided geographic coordinates')
+    logger.debug(', '.join(['min_x', 'min_y', 'max_x', 'max_y']))
+    logger.debug(', '.join([str(min_x), str(min_y), str(max_x), str(max_y)]))
 
     # Walk across the top and bottom of the geographic coordinates
     for lon in longitudes:
         # Upper side
-        (ux, uy, z) = transform.TransformPoint(lon, ul_lat)
+        (ux, uy, z) = transform.TransformPoint(lon, args.extent_maxy)
+        if ux < 1.0 or uy < 1.0:
+            raise TransformPointError('Error transforming point')
 
         # Lower side
-        (lx, ly, z) = transform.TransformPoint(lon, lr_lat)
+        (lx, ly, z) = transform.TransformPoint(lon, args.extent_miny)
+        if lx < 1.0 or ly < 1.0:
+            raise TransformPointError('Error transforming point')
 
         min_x = min(ux, lx, min_x)
         max_x = max(ux, lx, max_x)
@@ -524,10 +653,14 @@ def projection_minbox(ul_lon, ul_lat, lr_lon, lr_lat,
     # Walk along the left and right of the geographic coordinates
     for lat in latitudes:
         # Left side
-        (lx, ly, z) = transform.TransformPoint(ul_lon, lat)
+        (lx, ly, z) = transform.TransformPoint(args.extent_minx, lat)
+        if lx < 1.0 or ly < 1.0:
+            raise TransformPointError('Error transforming point')
 
         # Right side
-        (rx, ry, z) = transform.TransformPoint(lr_lon, lat)
+        (rx, ry, z) = transform.TransformPoint(args.extent_maxx, lat)
+        if rx < 1.0 or ry < 1.0:
+            raise TransformPointError('Error transforming point')
 
         min_x = min(rx, lx, min_x)
         max_x = max(rx, lx, max_x)
@@ -538,74 +671,44 @@ def projection_minbox(ul_lon, ul_lat, lr_lon, lr_lat,
     del source_srs
     del target_srs
 
-    logger.info('Map coordinates after minbox determination')
-    logger.info(','.join(['min_x', 'min_y', 'max_x', 'max_y']))
-    logger.info(','.join([str(min_x), str(min_y), str(max_x), str(max_y)]))
+    logger.debug('Map coordinates after minbox determination')
+    logger.debug(', '.join(['min_x', 'min_y', 'max_x', 'max_y']))
+    logger.debug(', '.join([str(min_x), str(min_y), str(max_x), str(max_y)]))
 
     return (min_x, min_y, max_x, max_y)
 
 
-def build_image_extents_string(parms, target_proj4):
-    '''
-    Description:
-      Build the gdal_warp image extents string from the determined min and max
-      values.
+class InsufficientExtentError(Exception):
+    pass
+
+
+def build_image_extents_string(args, target_proj4):
+    """Build the gdal_warp image extents string from the determined min and max
+       values
 
     Returns:
         str('min_x min_y max_x max_y')
-    '''
+    """
 
     # Nothing to do if we are not sub-setting the data
-    if not parms['image_extents']:
+    if not args.extent_units:
         return None
 
-    target_projection = parms['target_projection']
-
     # Get the image extents string
-    if (parms['image_extents_units'] == 'dd' and
-            (target_projection is None or target_projection != 'lonlat')):
+    if (args.extent_units == 'dd' and
+            (args.projection == 'none' or args.projection != 'lonlat')):
 
-        (min_x, min_y, max_x, max_y) = \
-            projection_minbox(parms['minx'], parms['maxy'],
-                              parms['maxx'], parms['miny'],
-                              target_proj4,
-                              parms['pixel_size'],
-                              parms['pixel_size_units'])
+        (min_x, min_y, max_x, max_y) = projection_minbox(args, target_proj4)
     else:
-        (min_x, min_y, max_x, max_y) = (parms['minx'], parms['miny'],
-                                        parms['maxx'], parms['maxy'])
+        (min_x, min_y, max_x, max_y) = (args.extent_minx, args.extent_miny,
+                                        args.extent_maxx, args.extent_maxy)
 
-    return ' '.join([str(min_x), str(min_y), str(max_x), str(max_y)])
+    if (max_x - min_x) < args.pixel_size:
+        raise InsufficientExtentError('Insufficient output pixels - longitude direction')
+    if (max_y - min_y) < args.pixel_size:
+        raise InsufficientExtentError('Insufficient output pixels - latitude direction')
 
-
-def build_base_warp_command(parms, output_format='envi', original_proj4=None):
-
-    # Get the proj4 projection string
-    if parms['projection'] is not None:
-        # Use the provided proj.4 projection string for the projection
-        target_proj4 = parms['projection']
-    elif parms['reproject']:
-        # Verify and create proj.4 projection string
-        target_proj4 = convert_target_projection_to_proj4(parms)
-    else:
-        # Default to the provided original proj.4 string
-        target_proj4 = original_proj4
-
-    image_extents = build_image_extents_string(parms, target_proj4)
-
-    cmd = ['gdalwarp', '-wm', '2048', '-multi', '-of', output_format]
-
-    # Subset the image using the specified extents
-    if image_extents is not None:
-        cmd.extend(['-te', image_extents])
-
-    # Reproject the data
-    if target_proj4 is not None:
-        # ***DO NOT*** split the projection string
-        # must be quoted with single quotes
-        cmd.extend(['-t_srs', "'%s'" % target_proj4])
-
-    return cmd
+    return [str(min_x), str(min_y), str(max_x), str(max_y)]
 
 
 def warp_image(source_file, output_file,
@@ -613,12 +716,8 @@ def warp_image(source_file, output_file,
                resample_method='near',
                pixel_size=None,
                no_data_value=None):
-    '''
-    Description:
-      Executes the warping command on the specified source file
-    '''
-
-    logger = EspaLogging.get_logger(settings.PROCESSING_LOGGER)
+    """Executes the warping command on the specified source file
+    """
 
     output = ''
     try:
@@ -642,17 +741,187 @@ def warp_image(source_file, output_file,
         # Now add the filenames
         cmd.extend([source_file, output_file])
 
-        cmd = ' '.join(cmd)
-        logger.info("Warping %s with %s" % (source_file, cmd))
-
-        output = utilities.execute_cmd(cmd)
+        logger.debug('Warping {0} with {1}'.format(source_file, ' '.join(cmd)))
+        try:
+            output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as error:
+            logger.error('Warping failed')
+            raise
 
     finally:
         if len(output) > 0:
-            logger.info(output)
+            logger.debug(output)
 
         # Remove the environment variable we set above
         del os.environ['GDAL_PAM_ENABLED']
+
+
+def determine_pixel_size_units_from_projection(projection_name):
+    """Determine the pixel size unit we support for the projection
+
+    Args:
+        projection_name <str>: Projection name
+
+    Returns:
+        <str>: Unit supported
+    """
+
+    if projection_name is not None:
+        if projection_name.lower().startswith('transverse_mercator'):
+            return 'meters'
+        elif projection_name.lower().startswith('polar'):
+            return 'meters'
+        elif projection_name.lower().startswith('albers'):
+            return 'meters'
+        elif projection_name.lower().startswith('sinusoidal'):
+            return 'meters'
+    else:
+        # Must be Geographic Projection
+        return 'degrees'
+
+
+def update_band_attributes(band, ds_transform, number_of_lines,
+                           number_of_samples, projection_name):
+    """Updates the band attributes
+
+    Args:
+        band <XML object>: Band XML object to update
+        ds_transform <GDAL transform object>: Transformation information
+        number_of_lines <int>: Line count
+        number_of_samples <int>: Sample count
+        projection_name <str>: Project the band is in
+
+    Returns:
+        band parameter is updated
+    """
+
+    logger.debug('PROJECTION NAME [{}]'.format(projection_name))
+
+    # Update the band information in the XML file
+    band.attrib['nlines'] = str(number_of_lines)
+    band.attrib['nsamps'] = str(number_of_samples)
+    # Need to abs these because they are coming from the transform,
+    # which may be correct for the transform,
+    # but not how us humans understand it
+    band.pixel_size.attrib['x'] = str(abs(ds_transform[1]))
+    band.pixel_size.attrib['y'] = str(abs(ds_transform[5]))
+
+    # For sanity report the resample method applied to the data
+    logger.debug('RESAMPLE METHOD [{}]'.format(band.resample_method))
+
+    # We only support one unit type for each projection
+    band.pixel_size.attrib['units'] = \
+        determine_pixel_size_units_from_projection(projection_name)
+
+
+def update_utm_parameters(gm, ds_srs, old_proj_params):
+    logger.info('Updating Projection with UTM Parameters')
+
+    # Create an element maker
+    em = objectify.ElementMaker(annotate=False, namespace=None, nsmap=None)
+
+    # Get the parameter values
+    zone = int(ds_srs.GetUTMZone())
+
+    # Get a new UTM projection parameter object and populate it
+    utm_proj_params = em.utm_proj_params()
+    utm_proj_params.zone_code = em.item(zone)
+
+    # Add the object to the projection information
+    gm.projection_information.replace(old_proj_params, utm_proj_params)
+
+    # Update the attribute values
+    gm.projection_information.attrib['projection'] = 'UTM'
+    gm.projection_information.attrib['datum'] = WGS84
+
+
+def update_polar_parameters(gm, ds_srs, old_proj_params):
+    logger.info('Updating Projection with Polar Stereographic Parameters')
+
+    # Create an element maker
+    em = objectify.ElementMaker(annotate=False, namespace=None, nsmap=None)
+
+    # Get the parameter values
+    latitude_true_scale = ds_srs.GetProjParm('latitude_of_origin')
+    longitude_pole = ds_srs.GetProjParm('central_meridian')
+    false_easting = ds_srs.GetProjParm('false_easting')
+    false_northing = ds_srs.GetProjParm('false_northing')
+
+    # Get a new PS projection parameter object and populate it
+    ps_proj_params = em.ps_proj_params()
+    ps_proj_params.longitude_pole = em.item(longitude_pole)
+    ps_proj_params.latitude_true_scale = em.item(latitude_true_scale)
+    ps_proj_params.false_easting = em.item(false_easting)
+    ps_proj_params.false_northing = em.item(false_northing)
+
+    # Add the object to the projection information
+    gm.projection_information.replace(old_proj_params, ps_proj_params)
+    # Update the attribute values
+    gm.projection_information.attrib['projection'] = 'PS'
+    gm.projection_information.attrib['datum'] = WGS84
+
+
+def update_albers_parameters(args, gm, ds_srs, old_proj_params):
+    logger.info('Updating Projection with Albers Equal Area Parameters')
+
+    # Create an element maker
+    em = objectify.ElementMaker(annotate=False, namespace=None, nsmap=None)
+
+    # Get the parameter values
+    standard_parallel1 = ds_srs.GetProjParm('standard_parallel_1')
+    standard_parallel2 = ds_srs.GetProjParm('standard_parallel_2')
+    origin_latitude = ds_srs.GetProjParm('latitude_of_center')
+    central_meridian = ds_srs.GetProjParm('longitude_of_center')
+    false_easting = ds_srs.GetProjParm('false_easting')
+    false_northing = ds_srs.GetProjParm('false_northing')
+
+    # Get a new ALBERS projection parameter object and populate it
+    albers_proj_params = em.albers_proj_params()
+    albers_proj_params.standard_parallel1 = em.item(standard_parallel1)
+    albers_proj_params.standard_parallel2 = em.item(standard_parallel2)
+    albers_proj_params.central_meridian = em.item(central_meridian)
+    albers_proj_params.origin_latitude = em.item(origin_latitude)
+    albers_proj_params.false_easting = em.item(false_easting)
+    albers_proj_params.false_northing = em.item(false_northing)
+
+    # Add the object to the projection information
+    gm.projection_information.replace(old_proj_params, albers_proj_params)
+
+    # Update the attribute values
+    gm.projection_information.attrib['projection'] = 'ALBERS'
+
+    # This projection can have different datums, so use the datum
+    # requested by the user
+    if 'datum' in args:
+        gm.projection_information.attrib['datum'] = args.datum
+    else:
+        print args
+        gm.projection_information.attrib['datum'] = WGS84
+
+
+def update_sinu_parameters(gm, ds_srs, old_proj_params):
+    logger.info('Updating Projection with Sinusoidal Parameters')
+
+    # Create an element maker
+    em = objectify.ElementMaker(annotate=False, namespace=None, nsmap=None)
+
+    # Get the parameter values
+    central_meridian = ds_srs.GetProjParm('longitude_of_center')
+    false_easting = ds_srs.GetProjParm('false_easting')
+    false_northing = ds_srs.GetProjParm('false_northing')
+
+    # Get a new SIN projection parameter object and populate it
+    sin_proj_params = em.sin_proj_params()
+    sin_proj_params.sphere_radius = em.item(SINUSOIDAL_SPHERE_RADIUS)
+    sin_proj_params.central_meridian = em.item(central_meridian)
+    sin_proj_params.false_easting = em.item(false_easting)
+    sin_proj_params.false_northing = em.item(false_northing)
+
+    # Add the object to the projection information
+    gm.projection_information.replace(old_proj_params, sin_proj_params)
+
+    # Update the attribute values
+    gm.projection_information.attrib['projection'] = 'SIN'
 
 
 def convert_imageXY_to_mapXY(image_x, image_y, transform):
@@ -667,16 +936,9 @@ def convert_imageXY_to_mapXY(image_x, image_y, transform):
     return (map_x, map_y)
 
 
-def update_espa_xml(parms, espa_metadata):
-
-    logger = EspaLogging.get_logger(settings.PROCESSING_LOGGER)
+def update_espa_xml(args, espa_metadata):
 
     try:
-        # Default the datum to WGS84
-        datum = settings.WGS84
-        if parms['datum'] is not None:
-            datum = parms['datum']
-
         # Create an element maker
         em = objectify.ElementMaker(annotate=False,
                                     namespace=None,
@@ -684,11 +946,11 @@ def update_espa_xml(parms, espa_metadata):
 
         for band in espa_metadata.xml_object.bands.band:
             img_filename = str(band.file_name)
-            logger.info("Updating XML for %s" % img_filename)
+            logger.info('Updating XML for {}'.format(img_filename))
 
             ds = gdal.Open(img_filename)
             if ds is None:
-                msg = "GDAL failed to open (%s)" % img_filename
+                msg = 'GDAL failed to open {}'.format(img_filename)
                 raise RuntimeError(msg)
 
             try:
@@ -699,115 +961,12 @@ def update_espa_xml(parms, espa_metadata):
             except Exception:
                 raise
 
-            projection_name = ds_srs.GetAttrValue('PROJECTION')
-
             number_of_lines = int(ds_band.YSize)
             number_of_samples = int(ds_band.XSize)
-            # Need to abs these because they are coming from the transform,
-            # which may becorrect for the transform,
-            # but not how us humans understand it
-            x_pixel_size = abs(ds_transform[1])
-            y_pixel_size = abs(ds_transform[5])
 
-            # Update the band information in the XML file
-            band.attrib['nlines'] = str(number_of_lines)
-            band.attrib['nsamps'] = str(number_of_samples)
-            band.pixel_size.attrib['x'] = str(x_pixel_size)
-            band.pixel_size.attrib['y'] = str(y_pixel_size)
-
-            # For sanity report the resample method applied to the data
-            logger.info("RESAMPLE METHOD [%s]" % band.resample_method)
-
-            # We only support one unit type for each projection
-            if projection_name is not None:
-                if projection_name.lower().startswith('transverse_mercator'):
-                    band.pixel_size.attrib['units'] = 'meters'
-                elif projection_name.lower().startswith('polar'):
-                    band.pixel_size.attrib['units'] = 'meters'
-                elif projection_name.lower().startswith('albers'):
-                    band.pixel_size.attrib['units'] = 'meters'
-                elif projection_name.lower().startswith('sinusoidal'):
-                    band.pixel_size.attrib['units'] = 'meters'
-            else:
-                # Must be Geographic Projection
-                band.pixel_size.attrib['units'] = 'degrees'
-
-            # If the CFmask band is present, fix the statistics
-            if (band.attrib['product'] == 'cfmask' and
-                    band.attrib['name'] == 'cfmask'):
-                fill_value = int(band.attrib['fill_value'])
-                cfmask_data = ds_band.ReadAsArray(0, 0,
-                                                  ds_band.XSize,
-                                                  ds_band.YSize)
-
-                # Get the counts
-                non_fill_count = (
-                    float(ds_band.XSize * ds_band.YSize -
-                          len(np.where(cfmask_data == fill_value)[0])))
-                clear_count = float(len(np.where(cfmask_data == 0)[0]))
-                water_count = float(len(np.where(cfmask_data == 1)[0]))
-                cs_count = float(len(np.where(cfmask_data == 2)[0]))
-                snow_count = float(len(np.where(cfmask_data == 3)[0]))
-                cloud_count = float(len(np.where(cfmask_data == 4)[0]))
-                logger.debug('non_fill_count {0}'.format(non_fill_count))
-                logger.debug('clear_count {0}'.format(clear_count))
-                logger.debug('water_count {0}'.format(water_count))
-                logger.debug('cloud_shadow_count {0}'.format(cs_count))
-                logger.debug('snow_count {0}'.format(snow_count))
-                logger.debug('cloud_count {0}'.format(cloud_count))
-
-                del cfmask_data
-                cfmask_data = None
-
-                # Get the percentages and truncate to a string
-                clear_percent = 0.0
-                water_percent = 0.0
-                cs_percent = 0.0
-                snow_percent = 0.0
-                cloud_percent = 0.0
-                if non_fill_count > 0:
-                    clear_percent = 100.0 * clear_count / non_fill_count
-                    water_percent = 100.0 * water_count / non_fill_count
-                    cs_percent = 100.0 * cs_count / non_fill_count
-                    snow_percent = 100.0 * snow_count / non_fill_count
-                    cloud_percent = 100.0 * cloud_count / non_fill_count
-
-                clear_percent = '{0:0.2f}'.format(clear_percent)
-                water_percent = '{0:0.2f}'.format(water_percent)
-                cs_percent = '{0:0.2f}'.format(cs_percent)
-                snow_percent = '{0:0.2f}'.format(snow_percent)
-                cloud_percent = '{0:0.2f}'.format(cloud_percent)
-                logger.debug('clear_percent {0}'.format(clear_percent))
-                logger.debug('water_percent {0}'.format(water_percent))
-                logger.debug('cloud_shadow_percent {0}'.format(cs_percent))
-                logger.debug('snow_percent {0}'.format(snow_percent))
-                logger.debug('cloud_percent {0}'.format(cloud_percent))
-
-                # Build the coverages component
-                percent_coverage = em.percent_coverage()
-
-                cover = em.cover(clear_percent)
-                cover.attrib['type'] = 'clear'
-                percent_coverage.append(cover)
-
-                cover = em.cover(water_percent)
-                cover.attrib['type'] = 'water'
-                percent_coverage.append(cover)
-
-                cover = em.cover(cs_percent)
-                cover.attrib['type'] = 'cloud_shadow'
-                percent_coverage.append(cover)
-
-                cover = em.cover(snow_percent)
-                cover.attrib['type'] = 'snow'
-                percent_coverage.append(cover)
-
-                cover = em.cover(cloud_percent)
-                cover.attrib['type'] = 'cloud'
-                percent_coverage.append(cover)
-
-                # Apply the coverages to the XML
-                band.percent_coverage = percent_coverage
+            update_band_attributes(band, ds_transform,
+                                   number_of_lines, number_of_samples,
+                                   ds_srs.GetAttrValue('PROJECTION'))
 
             del ds_band
             del ds
@@ -817,20 +976,20 @@ def update_espa_xml(parms, espa_metadata):
         ######################################################################
         gm = espa_metadata.xml_object.global_metadata
 
-        # Determine whether the scene uses lonlat projection and crosses the 
-        # antimeridian 
+        # Determine whether the scene uses lonlat projection and crosses the
+        # antimeridian
         antimeridian_crossing = 0
-        if (parms['target_projection'] == 'lonlat' and
-            gm.bounding_coordinates.east < 0 and
-            gm.bounding_coordinates.west > 0):
+        if (args.projection == 'lonlat' and
+                gm.bounding_coordinates.east < 0 and
+                gm.bounding_coordinates.west > 0):
             antimeridian_crossing = 1
+            logger.info('Data crosses the anti-meridian')
 
         # If the image extents were changed, then the scene center time is
         # meaningless so just remove it
         # We don't have any way to calculate a new one
-        if parms['image_extents']:
-            if 'scene_center_time' in gm:
-                gm.remove(gm.scene_center_time)
+        if args.extent_units and 'scene_center_time' in gm:
+            gm.remove(gm.scene_center_time)
 
         # Find the projection parameter object from the structure so that it
         # can be replaced with the new one
@@ -854,92 +1013,22 @@ def update_espa_xml(parms, espa_metadata):
         projection_name = ds_srs.GetAttrValue('PROJECTION')
         if projection_name is not None:
             if projection_name.lower().startswith('transverse_mercator'):
-                logger.info("---- Updating UTM Parameters")
-                # Get the parameter values
-                zone = int(ds_srs.GetUTMZone())
-                # Get a new UTM projection parameter object and populate it
-                utm_proj_params = em.utm_proj_params()
-                utm_proj_params.zone_code = em.item(zone)
-                # Add the object to the projection information
-                gm.projection_information.replace(old_proj_params,
-                                                  utm_proj_params)
-                # Update the attribute values
-                gm.projection_information.attrib['projection'] = 'UTM'
-                gm.projection_information.attrib['datum'] = settings.WGS84
+                update_utm_parameters(gm, ds_srs, old_proj_params)
 
             elif projection_name.lower().startswith('polar'):
-                logger.info("---- Updating Polar Stereographic Parameters")
-                # Get the parameter values
-                latitude_true_scale = ds_srs.GetProjParm('latitude_of_origin')
-                longitude_pole = ds_srs.GetProjParm('central_meridian')
-                false_easting = ds_srs.GetProjParm('false_easting')
-                false_northing = ds_srs.GetProjParm('false_northing')
-                # Get a new PS projection parameter object and populate it
-                ps_proj_params = em.ps_proj_params()
-                ps_proj_params.longitude_pole = em.item(longitude_pole)
-                ps_proj_params.latitude_true_scale = \
-                    em.item(latitude_true_scale)
-                ps_proj_params.false_easting = em.item(false_easting)
-                ps_proj_params.false_northing = em.item(false_northing)
-                # Add the object to the projection information
-                gm.projection_information.replace(old_proj_params,
-                                                  ps_proj_params)
-                # Update the attribute values
-                gm.projection_information.attrib['projection'] = 'PS'
-                gm.projection_information.attrib['datum'] = settings.WGS84
+                update_polar_parameters(gm, ds_srs, old_proj_params)
 
             elif projection_name.lower().startswith('albers'):
-                logger.info("---- Updating Albers Equal Area Parameters")
-                # Get the parameter values
-                standard_parallel1 = ds_srs.GetProjParm('standard_parallel_1')
-                standard_parallel2 = ds_srs.GetProjParm('standard_parallel_2')
-                origin_latitude = ds_srs.GetProjParm('latitude_of_center')
-                central_meridian = ds_srs.GetProjParm('longitude_of_center')
-                false_easting = ds_srs.GetProjParm('false_easting')
-                false_northing = ds_srs.GetProjParm('false_northing')
-                # Get a new ALBERS projection parameter object and populate it
-                albers_proj_params = em.albers_proj_params()
-                albers_proj_params.standard_parallel1 = \
-                    em.item(standard_parallel1)
-                albers_proj_params.standard_parallel2 = \
-                    em.item(standard_parallel2)
-                albers_proj_params.central_meridian = em.item(central_meridian)
-                albers_proj_params.origin_latitude = em.item(origin_latitude)
-                albers_proj_params.false_easting = em.item(false_easting)
-                albers_proj_params.false_northing = em.item(false_northing)
-                # Add the object to the projection information
-                gm.projection_information.replace(old_proj_params,
-                                                  albers_proj_params)
-                # Update the attribute values
-                gm.projection_information.attrib['projection'] = 'ALBERS'
-                # This projection can have different datums, so use the datum
-                # requested by the user
-                gm.projection_information.attrib['datum'] = datum
+                update_albers_parameters(args, gm, ds_srs, old_proj_params)
 
             elif projection_name.lower().startswith('sinusoidal'):
-                logger.info("---- Updating Sinusoidal Parameters")
-                # Get the parameter values
-                central_meridian = ds_srs.GetProjParm('longitude_of_center')
-                false_easting = ds_srs.GetProjParm('false_easting')
-                false_northing = ds_srs.GetProjParm('false_northing')
-                # Get a new SIN projection parameter object and populate it
-                sin_proj_params = em.sin_proj_params()
-                sin_proj_params.sphere_radius = \
-                    em.item(settings.SINUSOIDAL_SPHERE_RADIUS)
-                sin_proj_params.central_meridian = em.item(central_meridian)
-                sin_proj_params.false_easting = em.item(false_easting)
-                sin_proj_params.false_northing = em.item(false_northing)
-                # Add the object to the projection information
-                gm.projection_information.replace(old_proj_params,
-                                                  sin_proj_params)
-                # Update the attribute values
-                gm.projection_information.attrib['projection'] = 'SIN'
+                update_sinu_parameters(args, gm, ds_srs, old_proj_params)
 
         else:
             # Must be Geographic Projection
-            logger.info("---- Updating Geographic Parameters")
+            logger.info('Updating Projection with Geographic Parameters')
             gm.projection_information.attrib['projection'] = 'GEO'
-            gm.projection_information.attrib['datum'] = settings.WGS84
+            gm.projection_information.attrib['datum'] = WGS84
             gm.projection_information.attrib['units'] = 'degrees'
             gm.projection_information.remove(old_proj_params)
 
@@ -965,6 +1054,7 @@ def update_espa_xml(parms, espa_metadata):
             if cp.attrib['location'] == 'UL':
                 cp.attrib['x'] = str(map_ul_x)
                 cp.attrib['y'] = str(map_ul_y)
+
             if cp.attrib['location'] == 'LR':
                 cp.attrib['x'] = str(map_lr_x)
                 cp.attrib['y'] = str(map_lr_y)
@@ -986,6 +1076,7 @@ def update_espa_xml(parms, espa_metadata):
 
                 corner.attrib['longitude'] = str(lon)
                 corner.attrib['latitude'] = str(lat)
+
             if corner.attrib['location'] == 'LR':
                 (lon, lat, height) = \
                     coord_tf.TransformPoint(map_lr_x, map_lr_y)
@@ -1075,211 +1166,7 @@ def update_espa_xml(parms, espa_metadata):
     except Exception:
         raise
 
-
-def get_original_projection(img_filename):
-
-    ds = gdal.Open(img_filename)
-    if ds is None:
-        raise RuntimeError("GDAL failed to open (%s)" % img_filename)
-
-    ds_srs = osr.SpatialReference()
-    ds_srs.ImportFromWkt(ds.GetProjection())
-
-    proj4 = ds_srs.ExportToProj4()
-
-    del ds_srs
-    del ds
-
-    return proj4
-
-
-def warp_espa_data(parms, scene, xml_filename=None):
-    '''
-    Description:
-      Warp each espa science product to the parameters specified in the parms
-    '''
-
-    logger = EspaLogging.get_logger(settings.PROCESSING_LOGGER)
-
-    # Validate the parameters
-    parameters.validate_reprojection_parameters(parms, scene)
-
-    # De-register the DOQ drivers since they may cause a problem with some of
-    # our generated imagery.  And we are only processing envi format today
-    # inside the processing code.
-    doq1 = gdal.GetDriverByName('DOQ1')
-    doq2 = gdal.GetDriverByName('DOQ2')
-    doq1.Deregister()
-    doq2.Deregister()
-
-    # Verify something was provided for the XML filename
-    if xml_filename is None or xml_filename == '':
-        raise ESPAException("Missing XML Filename")
-
-    # Change to the working directory
-    current_directory = os.getcwd()
-    os.chdir(parms['work_directory'])
-
-    try:
-        # Create an element maker
-        em = objectify.ElementMaker(annotate=False,
-                                    namespace=None,
-                                    nsmap=None)
-
-        espa_metadata = Metadata()
-        espa_metadata.parse(xml_filename)
-        bands = espa_metadata.xml_object.bands
-        satellite = espa_metadata.xml_object.global_metadata.satellite
-        bounding_coordinates = \
-            espa_metadata.xml_object.global_metadata.bounding_coordinates
-
-        # Might need this for the base warp command image extents
-        original_proj4 = get_original_projection(str(bands.band[0].file_name))
-
-        # Build the base warp command to use
-        base_warp_command = \
-            build_base_warp_command(parms, original_proj4=str(original_proj4))
-
-        # Use the CENTER_LONG gdalwarp configuration setting if using
-        # geographic projection and crossing the antimeridian
-        if (parms['target_projection'] == 'lonlat' and
-            bounding_coordinates.east < 0 and bounding_coordinates.west > 0):
-            base_warp_command.extend(['--config', 'CENTER_LONG', '180'])
-
-        # Determine the user specified resample method
-        user_resample_method = 'near'  # default
-        if parms['resample_method'] is not None:
-            user_resample_method = parms['resample_method']
-
-        # Process through the bands in the XML file
-        for band in bands.band:
-            img_filename = str(band.file_name)
-            hdr_filename = img_filename.replace('.img', '.hdr')
-            logger.info("Processing %s" % img_filename)
-
-            # Reset the resample method to the user specified value
-            resample_method = user_resample_method
-
-            # Always use near for qa bands
-            if band.attrib['category'] == 'qa':
-                resample_method = 'near'  # over-ride with 'near'
-
-            # Update the XML metadata object for the resampling method used
-            # Later update_espa_xml is used to update the XML file
-            if resample_method == 'near':
-                band.resample_method = em.item('nearest neighbor')
-            if resample_method == 'bilinear':
-                band.resample_method = em.item('bilinear')
-            if resample_method == 'cubic':
-                band.resample_method = em.item('cubic convolution')
-
-            # Figure out the pixel size to use
-            pixel_size = parms['pixel_size']
-
-            # EXECUTIVE DECISION(Calli) - ESPA Issue 185
-            #    - If the band is (Landsat 7 or 8) and Band 8 do not resize
-            #      the pixels.
-            if ((satellite == 'LANDSAT_7' or satellite == 'LANDSAT_8') and
-                    band.attrib['name'] == 'b8'):
-                if parms['target_projection'] == 'lonlat':
-                    pixel_size = settings.DEG_FOR_15_METERS
-                else:
-                    pixel_size = float(band.pixel_size.attrib['x'])
-
-            # Open the image to read the no data value out since the internal
-            # ENVI driver for GDAL does not output it, even if it is known
-            ds = gdal.Open(img_filename)
-            if ds is None:
-                raise RuntimeError("GDAL failed to open (%s)" % img_filename)
-
-            ds_band = None
-            try:
-                ds_band = ds.GetRasterBand(1)
-            except Exception:
-                raise
-
-            # Save the no data value since gdalwarp does not write it out when
-            # using the ENVI format
-            no_data_value = ds_band.GetNoDataValue()
-            if no_data_value is not None:
-                # TODO - We don't process any floating point data types.  Yet
-                # Convert to an integer then string
-                no_data_value = str(int(no_data_value))
-
-            # Force a freeing of the memory
-            del ds_band
-            del ds
-
-            tmp_img_filename = 'tmp-%s' % img_filename
-            tmp_hdr_filename = 'tmp-%s' % hdr_filename
-
-            warp_image(img_filename, tmp_img_filename,
-                       base_warp_command=base_warp_command,
-                       resample_method=resample_method,
-                       pixel_size=pixel_size,
-                       no_data_value=no_data_value)
-
-            ##################################################################
-            # Get new everything for the re-projected band
-            ##################################################################
-
-            # Update the tmp ENVI header with our own values for some fields
-            sb = StringIO()
-            with open(tmp_hdr_filename, 'r') as tmp_fd:
-                while True:
-                    line = tmp_fd.readline()
-                    if not line:
-                        break
-                    if (line.startswith('data ignore value') or
-                            line.startswith('description')):
-                        pass
-                    else:
-                        sb.write(line)
-
-                    if line.startswith('description'):
-                        # This may be on multiple lines so read lines until
-                        # we find the closing brace
-                        if not line.strip().endswith('}'):
-                            while 1:
-                                next_line = tmp_fd.readline()
-                                if (not next_line or
-                                        next_line.strip().endswith('}')):
-                                    break
-                        sb.write('description = {ESPA-generated file}\n')
-                    elif (line.startswith('data type') and
-                          (no_data_value is not None)):
-                        sb.write('data ignore value = %s\n' % no_data_value)
-
-            # Do the actual replace here
-            with open(tmp_hdr_filename, 'w') as tmp_fd:
-                tmp_fd.write(sb.getvalue())
-
-            # Remove the original files, they are replaced in following code
-            if os.path.exists(img_filename):
-                os.unlink(img_filename)
-            if os.path.exists(hdr_filename):
-                os.unlink(hdr_filename)
-
-            # Rename the temps file back to the original name
-            os.rename(tmp_img_filename, img_filename)
-            os.rename(tmp_hdr_filename, hdr_filename)
-
-        # Update the XML to reflect the new warped output
-        update_espa_xml(parms, espa_metadata)
-
-        # Validate the XML
-        espa_metadata.validate()
-
-        # Write it to the XML file
-        espa_metadata.write(xml_filename=xml_filename)
-
-        del espa_metadata
-
-    finally:
-        # Change back to the previous directory
-        os.chdir(current_directory)
-
-
+"""
 def reformat(metadata_filename, work_directory, input_format, output_format):
     '''
     Description:
@@ -1389,10 +1276,254 @@ def reformat(metadata_filename, work_directory, input_format, output_format):
         os.chdir(current_directory)
 """
 
-def main():
-    args = retrieve_command_line_arguments()
+
+def list_gdal_drivers():
+    """Generates a list of all the short names for the GDAL image drivers
+
+    Returns:
+        <list>: A list of driver short names
+    """
+
+    return [gdal.GetDriver(index).ShortName
+            for index in xrange(gdal.GetDriverCount())]
+
+
+def delete_gdal_drivers(exclusions=list()):
+    """Deletes all GDAL image drivers except those in the exclusions list
+    """
+
+    for name in list_gdal_drivers():
+        if name not in exclusions:
+            gdal.GetDriverByName(name).Deregister()
+
+
+def get_original_projection(img_filename):
+
+    ds = gdal.Open(img_filename)
+    if ds is None:
+        raise RuntimeError('GDAL failed to open ({})'.format(img_filename))
+
+    ds_srs = osr.SpatialReference()
+    ds_srs.ImportFromWkt(ds.GetProjection())
+
+    proj4 = ds_srs.ExportToProj4()
+
+    del ds_srs
+    del ds
+
+    return proj4
+
+
+def build_base_warp_command(args, original_proj4=None):
+
+    # Get the proj4 projection string
+    if args.projection == 'none':
+        # Default to the provided original proj.4 string
+        target_proj4 = original_proj4
+    elif args.projection == 'proj4':
+        # Use the provided proj.4 projection string for the projection
+        target_proj4 = args.proj4_string
+    else:
+        # Verify and create proj.4 projection string
+        target_proj4 = convert_target_projection_to_proj4(args)
+
+    image_extents = build_image_extents_string(args, target_proj4)
+
+    cmd = ['gdalwarp', '-wm', '2048', '-multi', '-of', args.output_format]
+
+    # Subset the image using the specified extents
+    if image_extents is not None:
+        cmd.extend(['-te'])
+        cmd.extend(image_extents)
+
+    # Reproject the data
+    if target_proj4 is not None:
+        # ***DO NOT*** split the projection string
+        # must be quoted with single quotes
+        cmd.extend(['-t_srs', "{}".format(target_proj4)])
+
+    return cmd
+
+
+class CommandLineError(Exception):
     pass
 
 
+def main():
+    parser = build_command_line_arguments()
+    args = parser.parse_args()
+
+    setup_logging(args)
+
+    if (args.extent_minx or args.extent_miny or args.extent_maxx
+            or args.extent_maxy or args.extent_units):
+        if (not args.extent_minx or not args.extent_miny
+                or not args.extent_maxx or not args.extent_maxy
+                or not args.extent_units):
+            raise CommandLineError('All extent arguments must be specified')
+
+    if args.pixel_size or args.pixel_size_units:
+        if not args.pixel_size or not args.pixel_size_units:
+            raise CommandLineError('All pixel size arguments must be specified')
+
+    # We are only supporting ENVI format since this is used by ESPA.
+    delete_gdal_drivers(['ENVI'])
+
+    # Create an element maker for new items
+    em = objectify.ElementMaker(annotate=False, namespace=None, nsmap=None)
+
+    espa_metadata = Metadata(args.xml_filename)
+    bands = espa_metadata.xml_object.bands
+    satellite = espa_metadata.xml_object.global_metadata.satellite
+    bounding_coordinates = (espa_metadata.xml_object.global_metadata.
+                            bounding_coordinates)
+
+    # Default to the pixel information from the metadata
+    if args.extent_units and not args.pixel_size_units:
+        args.pixel_size = float(bands.band[0].pixel_size.attrib['x'])
+        args.pixel_size_units = str(bands.band[0].pixel_size.attrib['units'])
+
+    # Might need this for the base warp command image extents
+    original_proj4 = get_original_projection(str(bands.band[0].file_name))
+
+    # Build the base warp command to use
+    base_warp_command = \
+        build_base_warp_command(args, original_proj4=str(original_proj4))
+
+    # Use the CENTER_LONG gdalwarp configuration setting if using
+    # geographic projection and crossing the antimeridian
+    if (args.projection == 'lonlat' and
+            bounding_coordinates.east < 0 and bounding_coordinates.west > 0):
+        base_warp_command.extend(['--config', 'CENTER_LONG', '180'])
+
+    # Process through the bands in the XML file
+    for band in bands.band:
+        img_filename = str(band.file_name)
+        hdr_filename = img_filename.replace('.img', '.hdr')
+        logger.info("Processing %s" % img_filename)
+
+        # Reset the resample method to the user specified value
+        resample_method = args.resample_method
+
+        # Always use near for qa bands
+        if band.attrib['category'] == 'qa':
+            resample_method = 'near'  # over-ride with 'near'
+
+        # Update the XML metadata object for the resampling method used
+        # Later update_espa_xml is used to update the XML file
+        if resample_method == 'near':
+            band.resample_method = em.item('nearest neighbor')
+        if resample_method == 'bilinear':
+            band.resample_method = em.item('bilinear')
+        if resample_method == 'cubic':
+            band.resample_method = em.item('cubic convolution')
+
+        # Figure out the pixel size to use
+        pixel_size = args.pixel_size
+
+        # EXECUTIVE DECISION(Calli)
+        # - If the band is (Landsat 7 or 8) and Band 8 do not resize
+        #   the pixels.
+        if ((satellite == 'LANDSAT_7' or satellite == 'LANDSAT_8') and
+                band.attrib['name'] == 'b8'):
+            if args.projection == 'lonlat':
+                pixel_size = settings.DEG_FOR_15_METERS
+            else:
+                pixel_size = float(band.pixel_size.attrib['x'])
+
+        # Open the image to read the no data value out since the internal
+        # ENVI driver for GDAL does not output it, even if it is known
+        ds = gdal.Open(img_filename)
+        if ds is None:
+            raise RuntimeError('GDAL failed to open ({})'.format(img_filename))
+
+        ds_band = None
+        ds_band = ds.GetRasterBand(1)
+
+        # Save the no data value since gdalwarp does not write it out when
+        # using the ENVI format
+        no_data_value = ds_band.GetNoDataValue()
+        if no_data_value is not None:
+            no_data_value = str(no_data_value)
+
+        # Force a freeing of the memory
+        del ds_band
+        del ds
+
+        tmp_img_filename = 'tmp-%s' % img_filename
+        tmp_hdr_filename = 'tmp-%s' % hdr_filename
+
+        warp_image(img_filename, tmp_img_filename,
+                   base_warp_command=base_warp_command,
+                   resample_method=resample_method,
+                   pixel_size=pixel_size,
+                   no_data_value=no_data_value)
+
+        ##################################################################
+        # Get new everything for the re-projected band
+        ##################################################################
+
+        # Update the tmp ENVI header with our own values for some fields
+        sb = StringIO()
+        with open(tmp_hdr_filename, 'r') as tmp_fd:
+            while True:
+                line = tmp_fd.readline()
+                if not line:
+                    break
+                if (line.startswith('data ignore value') or
+                        line.startswith('description')):
+                    pass
+                else:
+                    sb.write(line)
+
+                if line.startswith('description'):
+                    # This may be on multiple lines so read lines until
+                    # we find the closing brace
+                    if not line.strip().endswith('}'):
+                        while 1:
+                            next_line = tmp_fd.readline()
+                            if (not next_line or
+                                    next_line.strip().endswith('}')):
+                                break
+                    sb.write('description = {ESPA-generated file}\n')
+                elif (line.startswith('data type') and
+                      (no_data_value is not None)):
+                    sb.write('data ignore value = %s\n' % no_data_value)
+
+        # Do the actual replace here
+        with open(tmp_hdr_filename, 'w') as tmp_fd:
+            tmp_fd.write(sb.getvalue())
+
+        # Remove the original files, they are replaced in following code
+        if os.path.exists(img_filename):
+            os.unlink(img_filename)
+        if os.path.exists(hdr_filename):
+            os.unlink(hdr_filename)
+
+        # Rename the temps file back to the original name
+        os.rename(tmp_img_filename, img_filename)
+        os.rename(tmp_hdr_filename, hdr_filename)
+
+    # Update the XML to reflect the new warped output
+    update_espa_xml(args, espa_metadata)
+
+    # Validate the XML
+    espa_metadata.validate()
+
+    # Write it to the XML file
+    espa_metadata.write(xml_filename=args.xml_filename)
+
+    del espa_metadata
+
+
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception:
+        if logger is not None:
+            logger.exception('Exception Encountered')
+            logger.error('Processing Terminated - Failure')
+        sys.exit(1)
+
+    if logger is not None:
+        logger.info('Processing Terminated - Success')
