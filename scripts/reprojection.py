@@ -125,8 +125,9 @@ def bcl_add_customization_arguments(sub_p, required, pixel_units):
     """Adds the customization arguments to the parser
 
     Args:
-        sub_p <ArgumentParser>:
-        required <bool>: Add the information from the XML metadata
+        sub_p <ArgumentParser>: Parent parser
+        required <ArgumentParser>: Required group for any required arguments
+        pixel_units <list>: Pixel unit choices for the projection
     """
 
     # Future options ???? ['cubicspline', 'lanczos']
@@ -211,6 +212,12 @@ def bcl_add_customization_arguments(sub_p, required, pixel_units):
 
 
 def bcl_add_central_meridian(parser):
+    """Adds the central meridian argument to the parser
+
+    Args:
+        parser <ArgumentParser>: Parser to add the argument to
+    """
+
     parser.add_argument('--central-meridian',
                         action='store',
                         dest='central_meridian',
@@ -222,6 +229,12 @@ def bcl_add_central_meridian(parser):
 
 
 def bcl_add_origin_latitude(parser):
+    """Adds the origin latitude argument to the parser
+
+    Args:
+        parser <ArgumentParser>: Parser to add the argument to
+    """
+
     parser.add_argument('--origin-latitude',
                         action='store',
                         dest='origin_latitude',
@@ -233,6 +246,12 @@ def bcl_add_origin_latitude(parser):
 
 
 def bcl_add_datum(parser):
+    """Adds the datum argument to the parser
+
+    Args:
+        parser <ArgumentParser>: Parser to add the argument to
+    """
+
     parser.add_argument('--datum',
                         action='store',
                         dest='datum',
@@ -245,6 +264,12 @@ def bcl_add_datum(parser):
 
 
 def bcl_add_false_easting_northing(parser):
+    """Adds the false easting and false northing arguments to the parser
+
+    Args:
+        parser <ArgumentParser>: Parser to add the argument to
+    """
+
     parser.add_argument('--false-easting',
                         action='store',
                         dest='false_easting',
@@ -265,6 +290,12 @@ def bcl_add_false_easting_northing(parser):
 
 
 def bcl_add_none(parser):
+    """Adds the None command and parameters to the parser
+
+    Args:
+        parser <ArgumentParser>: Parser to add the command to
+    """
+
     description = 'Only Customization'
     sub_p = parser.add_parser('none',
                               description=description,
@@ -276,6 +307,12 @@ def bcl_add_none(parser):
 
 
 def bcl_add_proj4(parser):
+    """Adds the Proj4 command and parameters to the parser
+
+    Args:
+        parser <ArgumentParser>: Parser to add the command to
+    """
+
     description = 'PROJ4 Projection String'
     sub_p = parser.add_parser('proj4',
                               description=description,
@@ -295,6 +332,12 @@ def bcl_add_proj4(parser):
 
 
 def bcl_add_lonlat(parser):
+    """Adds the Geographic command and parameters to the parser
+
+    Args:
+        parser <ArgumentParser>: Parser to add the command to
+    """
+
     description = 'Geographic Projection'
     sub_p = parser.add_parser('lonlat',
                               description=description,
@@ -306,6 +349,12 @@ def bcl_add_lonlat(parser):
 
 
 def bcl_add_utm(parser):
+    """Adds the UTM command and parameters to the parser
+
+    Args:
+        parser <ArgumentParser>: Parser to add the command to
+    """
+
     description = 'UTM Projection'
     sub_p = parser.add_parser('utm',
                               description=description,
@@ -335,6 +384,12 @@ def bcl_add_utm(parser):
 
 
 def bcl_add_sinu(parser):
+    """Adds the Sinusoidal command and parameters to the parser
+
+    Args:
+        parser <ArgumentParser>: Parser to add the command to
+    """
+
     description = 'Sinusoidal Projection'
     sub_p = parser.add_parser('sinu',
                               description=description,
@@ -348,7 +403,12 @@ def bcl_add_sinu(parser):
 
 
 def bcl_add_aea(parser):
-    # ---------------------------------
+    """Adds the Albers Equal Area command and parameters to the parser
+
+    Args:
+        parser <ArgumentParser>: Parser to add the command to
+    """
+
     description = 'Albers Equal Area Projection'
     sub_p = parser.add_parser('aea',
                               description=description,
@@ -383,7 +443,12 @@ def bcl_add_aea(parser):
 
 
 def bcl_add_ps(parser):
-    # ---------------------------------
+    """Adds the Polar Stereographic command and parameters to the parser
+
+    Args:
+        parser <ArgumentParser>: Parser to add the command to
+    """
+
     description = 'Polar-Stereographic Projection'
     sub_p = parser.add_parser('ps',
                               description=description,
