@@ -122,13 +122,19 @@ def setup_logging(args):
 
 
 def bcl_add_customization_arguments(sub_p, required, pixel_units):
+    """Adds the customization arguments to the parser
 
+    Args:
+        sub_p <ArgumentParser>:
+        required <bool>: Add the information from the XML metadata
+    """
+
+    # Future options ???? ['cubicspline', 'lanczos']
     required.add_argument('--resample-method',
                         action='store',
                         dest='resample_method',
                         required=True,
-                        choices=['near', 'bilinear', 'cubic',
-                                 'cubicspline', 'lanczos'],
+                        choices=['near', 'bilinear', 'cubic'],
                         default='near',
                         metavar='TEXT',
                         type=str,
@@ -450,8 +456,114 @@ def build_command_line_arguments():
     return parser
 
 
+class CommandLineError(Exception):
+    pass
+
+
+def verify_command_line(args):
+    """Additional verification of command line parameters
+
+    Args:
+        args <ArgumentParser>: User supplied command line arguments
+    """
+
+    if (args.extent_minx or args.extent_miny or args.extent_maxx
+            or args.extent_maxy or args.extent_units):
+        if (not args.extent_minx or not args.extent_miny
+                or not args.extent_maxx or not args.extent_maxy
+                or not args.extent_units):
+            raise CommandLineError('All extent arguments must be specified')
+
+    if args.pixel_size or args.pixel_size_units:
+        if not args.pixel_size or not args.pixel_size_units:
+            raise CommandLineError('All pixel size arguments must be'
+                                   ' specified')
+
+
+def determine_resample_method(args, band):
+    """Determines the correct resampling method based on the category of the
+       data to be processed
+
+    Args:
+        args <ArgumentParser>: User supplied command line arguments
+        band <XML object>: Band information from the XML metadata
+
+    Returns:
+        <str>: Resample method to use
+    """
+
+    # Always use near for qa bands
+    if band.attrib['category'] == 'qa':
+        return 'near'
+    else:
+        return args.resample_method
+
+
+def determine_pixel_size(args, global_metadata, band):
+    """Determines the correct pixel size to use based on the band being
+       processed
+
+    Args:
+        args <ArgumentParser>: User supplied command line arguments
+        global_metadata <XML object>: Global metadata from the XML metadata
+        band <XML object>: Band information from the XML metadata
+
+    Returns:
+        <float>: Pixel size value
+    """
+
+    pixel_size = args.pixel_size
+
+    # EXECUTIVE DECISION(Calli)
+    # - If the band is (Landsat 7 or 8) and Band 8 do not resize
+    #   the pixels.
+    if ((global_metadata.satellite == 'LANDSAT_7' or
+            global_metadata.satellite == 'LANDSAT_8') and
+            band.attrib['name'] == 'b8'):
+
+        if args.projection == 'lonlat':
+            pixel_size = DEG_FOR_15_METERS
+        else:
+            pixel_size = float(band.pixel_size.attrib['x'])
+
+    return pixel_size
+
+
+def determine_no_data_value(img_filename):
+    """Determines the correct no data value to use based on the band being
+       processerd
+
+    Returns:
+        <str>: String version of the no data value from the band data
+    """
+
+    # Open the image to read the no data value out since the internal
+    # ENVI driver for GDAL does not output it, even if it is known
+    ds = gdal.Open(img_filename)
+    if ds is None:
+        raise RuntimeError('GDAL failed to open ({})'.format(img_filename))
+
+    ds_band = None
+    ds_band = ds.GetRasterBand(1)
+
+    # Save the no data value since gdalwarp does not write it out when
+    # using the ENVI format
+    no_data_value = ds_band.GetNoDataValue()
+    if no_data_value is not None:
+        no_data_value = str(no_data_value)
+
+    # Force a freeing of the memory
+    del ds_band
+    del ds
+
+    return no_data_value
+
+
 def build_sinu_proj4_string(args):
     """Builds a proj.4 string for sinusoidal
+
+    Args:
+        args <ArgumentParser>: User supplied command line arguments
 
     Example:
       +proj=sinu +lon_0=0 +x_0=0 +y_0=0 +a=6371007.181 +b=6371007.181
@@ -469,13 +581,17 @@ def build_sinu_proj4_string(args):
 def build_albers_proj4_string(args):
     """Builds a proj.4 string for albers equal area
 
+    Args:
+        args <ArgumentParser>: User supplied command line arguments
+
     Example:
       +proj=aea +lat_1=20 +lat_2=60 +lat_0=40 +lon_0=-96 +x_0=0 +y_0=0
       +ellps=GRS80 +datum=NAD83 +units=m +no_defs
     """
 
     projection = ('+proj=aea +lat_1={0} +lat_2={1} +lat_0={2} +lon_0={3}'
-                  ' +x_0={4} +y_0={5} +ellps=GRS80 +datum={6} +units=m +no_defs'
+                  ' +x_0={4} +y_0={5} +ellps=GRS80 +datum={6} +units=m'
+                  ' +no_defs'
                   .format(args.std_parallel_1, args.std_parallel_2,
                           args.origin_latitude, args.central_meridian,
                           args.false_easting, args.false_northing,
@@ -486,6 +602,9 @@ def build_albers_proj4_string(args):
 
 def build_utm_proj4_string(args):
     """Builds a proj.4 string for utm
+
+    Args:
+        args <ArgumentParser>: User supplied command line arguments
 
     Note:
       The ellipsoid probably doesn't need to be specified.
@@ -510,10 +629,11 @@ def build_utm_proj4_string(args):
 
 
 def build_ps_proj4_string(args):
-    '''
-    Description:
-      Builds a proj.4 string for polar stereographic
-      gdalsrsinfo 'EPSG:3031'
+    """Builds a proj.4 string for polar stereographic
+       gdalsrsinfo 'EPSG:3031'
+
+    Args:
+        args <ArgumentParser>: User supplied command line arguments
 
     Examples:
       +proj=stere +lat_0=90 +lat_ts=71 +lon_0=0 +k=1 +x_0=0 +y_0=0
@@ -521,7 +641,7 @@ def build_ps_proj4_string(args):
 
       +proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +k=1 +x_0=0 +y_0=0
         +datum=WGS84 +units=m +no_defs
-    '''
+    """
 
     projection = ('+proj=stere +lat_ts={0} +lat_0={1} +lon_0={2} +k_0=1.0'
                   ' +x_0={3} +y_0={4} +datum=WGS84 +units=m +no_defs'
@@ -533,12 +653,13 @@ def build_ps_proj4_string(args):
 
 
 def convert_target_projection_to_proj4(args):
-    '''
-    Description:
-      Checks to see if the reproject parameter was set.  If set the
-      target projection is validated against the implemented projections and
-      depending on the projection, the correct proj4 parameters are returned.
-    '''
+    """The target projection is validated against the implemented projections
+       and depending on the projection, the correct proj4 parameters are
+       returned
+
+    Args:
+        args <ArgumentParser>: User supplied command line arguments
+    """
 
     projection = None
 
@@ -565,25 +686,18 @@ class TransformPointError(Exception):
 
 
 def projection_minbox(args, target_proj4):
-    '''
-    Description:
-      Determines the minimum box in map coordinates that contains the
-      geographic coordinates.  Minimum and maximum extent values are returned
-      in map coordinates.
+    """Determines the minimum box in map coordinates that contains the
+       geographic coordinates
 
-    Parameters:
-      ul_lon       = Upper Left longitude in decimal degrees
-      ul_lat       = Upper Left latitude in decimal degrees
-      lr_lon       = Lower Right longitude in decimal degrees
-      lr_lat       = Lower Right latitude in decimal degrees
-      target_proj4 = The user supplied target proj4 string
-      pixel_size   = The target pixel size in meters used to step along the
-                     projected area boundary
-      pixel_size_units = The units the pixel size is in 'dd' or 'meters'
+    Args:
+        args <ArgumentParser>: User supplied command line arguments
 
     Returns:
         (min_x, min_y, max_x, max_y) in meters
-    '''
+
+    Note:
+        Minimum and maximum extent values are returned in map coordinates.
+    """
 
     logger.debug('Determining Image Extents For Requested Projection')
 
@@ -704,9 +818,11 @@ def build_image_extents_string(args, target_proj4):
                                         args.extent_maxx, args.extent_maxy)
 
     if (max_x - min_x) < args.pixel_size:
-        raise InsufficientExtentError('Insufficient output pixels - longitude direction')
+        raise InsufficientExtentError('Insufficient output pixels -'
+                                      ' longitude direction')
     if (max_y - min_y) < args.pixel_size:
-        raise InsufficientExtentError('Insufficient output pixels - latitude direction')
+        raise InsufficientExtentError('Insufficient output pixels -'
+                                      ' latitude direction')
 
     return [str(min_x), str(min_y), str(max_x), str(max_y)]
 
@@ -721,9 +837,6 @@ def warp_image(source_file, output_file,
 
     output = ''
     try:
-        # Turn GDAL PAM off to prevent *.aux.xml files
-        os.environ['GDAL_PAM_ENABLED'] = 'NO'
-
         cmd = copy.deepcopy(base_warp_command)
 
         # Resample method to use
@@ -741,7 +854,8 @@ def warp_image(source_file, output_file,
         # Now add the filenames
         cmd.extend([source_file, output_file])
 
-        logger.debug('Warping {0} with {1}'.format(source_file, ' '.join(cmd)))
+        logger.debug('Warping {0} with {1}'.format(source_file,
+                                                   ' '.join(cmd)))
         try:
             output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as error:
@@ -752,8 +866,79 @@ def warp_image(source_file, output_file,
         if len(output) > 0:
             logger.debug(output)
 
-        # Remove the environment variable we set above
-        del os.environ['GDAL_PAM_ENABLED']
+
+class WarpVerificationError(Exception):
+    pass
+
+
+WARP_ERROR_STRING = ('Failed to compute statistics,'
+                     ' no valid pixels found in sampling')
+
+
+def verify_warping(img_filename):
+
+    cmd = ['gdalinfo', '-stats', img_filename]
+    logger.debug('Verifying warp with {}'.format(' '.join(cmd)))
+    try:
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT,
+                                         shell=True)
+
+        if WARP_ERROR_STRING in output:
+
+            raise WarpVerificationError(WARP_ERROR_STRING)
+    except subprocess.CalledProcessError as error:
+        logger.error('Warping failed')
+        raise
+
+
+def fix_envi_header(no_data_value, warped_hdr_filename):
+    """Update the tmp ENVI header with our own values for some fields
+    """
+
+    sb = StringIO()
+    with open(warped_hdr_filename, 'r') as warped_fd:
+        while True:
+            line = warped_fd.readline()
+            if not line:
+                break
+            if (line.startswith('data ignore value') or
+                    line.startswith('description')):
+                pass
+            else:
+                sb.write(line)
+
+            if line.startswith('description'):
+                # This may be on multiple lines so read lines until
+                # we find the closing brace
+                if not line.strip().endswith('}'):
+                    while 1:
+                        next_line = warped_fd.readline()
+                        if (not next_line or
+                                next_line.strip().endswith('}')):
+                            break
+                sb.write('description = {ESPA-generated file}\n')
+            elif (line.startswith('data type') and
+                  (no_data_value is not None)):
+                sb.write('data ignore value = %s\n' % no_data_value)
+
+    # Do the actual replace here
+    with open(warped_hdr_filename, 'w') as warped_fd:
+        warped_fd.write(sb.getvalue())
+
+def replace_product_files(img_filename, hdr_filename,
+                          warped_img_filename, warped_hdr_filename):
+    """Replace the product files with the newly warped files
+    """
+
+    # Remove the original files
+    if os.path.exists(img_filename):
+        os.unlink(img_filename)
+    if os.path.exists(hdr_filename):
+        os.unlink(hdr_filename)
+
+    # Rename the temp files back to the original names
+    os.rename(warped_img_filename, img_filename)
+    os.rename(warped_hdr_filename, hdr_filename)
 
 
 def determine_pixel_size_units_from_projection(projection_name):
@@ -812,6 +997,43 @@ def update_band_attributes(band, ds_transform, number_of_lines,
     # We only support one unit type for each projection
     band.pixel_size.attrib['units'] = \
         determine_pixel_size_units_from_projection(projection_name)
+
+
+def update_bands(args, espa_metadata):
+    em = objectify.ElementMaker(annotate=False, namespace=None, nsmap=None)
+
+    for band in espa_metadata.xml_object.bands.band:
+        img_filename = str(band.file_name)
+        logger.info('Updating XML for {}'.format(img_filename))
+
+        resample_method = determine_resample_method(args, band)
+
+        # Update the XML metadata object for the resampling method used
+        band.resample_method = \
+            em.item(XML_BAND_TRANSLATION[resample_method])
+
+        ds = gdal.Open(img_filename)
+        if ds is None:
+            msg = 'GDAL failed to open {}'.format(img_filename)
+            raise RuntimeError(msg)
+
+        try:
+            ds_band = ds.GetRasterBand(1)
+            ds_transform = ds.GetGeoTransform()
+            ds_srs = osr.SpatialReference()
+            ds_srs.ImportFromWkt(ds.GetProjection())
+        except Exception:
+            raise
+
+        number_of_lines = int(ds_band.YSize)
+        number_of_samples = int(ds_band.XSize)
+
+        update_band_attributes(band, ds_transform,
+                               number_of_lines, number_of_samples,
+                               ds_srs.GetAttrValue('PROJECTION'))
+
+        del ds_band
+        del ds
 
 
 def update_utm_parameters(gm, ds_srs, old_proj_params):
@@ -936,40 +1158,85 @@ def convert_imageXY_to_mapXY(image_x, image_y, transform):
     return (map_x, map_y)
 
 
+XML_BAND_TRANSLATION = {
+    'near': 'nearest neighbor',
+    'bilinear': 'bilinear',
+    'cubic': 'cubic convolution'
+}
+
+
+# All of these bands are equivalent with regards to lins/samples and
+# projection information
+REFERENCE_BANDS = {
+    'L1TP': ['b1', 'b2', 'b3', 'b4', 'b5', 'b7', 'bqa'],
+    'level2_qa': ['pixel_qa'],
+    'toa_refl': ['toa_band1', 'toa_band2', 'toa_band3', 'toa_band4',
+                 'toa_band5', 'toa_band7', 'toa_band1'],
+    'sr_refl': ['sr_band1', 'sr_band2', 'sr_band3', 'sr_band4',
+                'sr_band5', 'sr_band7', 'sr_band1'],
+}
+
+
+class MissingReferenceBand(Exception):
+    pass
+
+
+def determine_ref_image_filename(espa_metadata):
+
+    img_filename = None
+
+    for band in espa_metadata.xml_object.bands.band:
+        product = band.attrib['product']
+        name = band.attrib['name']
+        if product in REFERENCE_BANDS and name in REFERENCE_BANDS[product]:
+
+            img_filename = str(band.file_name)
+            break
+
+    if img_filename is None:
+        raise MissingReferenceBand('Required reference bands not found')
+
+    return img_filename
+
+
+def crosses_antimeridian(args, global_metadata):
+
+    # Determine whether the scene uses lonlat projection and crosses the
+    # antimeridian
+    if (args.projection == 'lonlat' and
+            global_metadata.bounding_coordinates.east < 0 and
+            global_metadata.bounding_coordinates.west > 0):
+        logger.info('Data crosses the anti-meridian')
+        return True
+
+    return False
+
+
 def update_espa_xml(args, espa_metadata):
 
     try:
         # Create an element maker
-        em = objectify.ElementMaker(annotate=False,
-                                    namespace=None,
-                                    nsmap=None)
+        em = objectify.ElementMaker(annotate=False, namespace=None, nsmap=None)
 
-        for band in espa_metadata.xml_object.bands.band:
-            img_filename = str(band.file_name)
-            logger.info('Updating XML for {}'.format(img_filename))
+        update_bands(args, espa_metadata)
 
-            ds = gdal.Open(img_filename)
-            if ds is None:
-                msg = 'GDAL failed to open {}'.format(img_filename)
-                raise RuntimeError(msg)
+        reference_image_filename = determine_ref_image_filename(espa_metadata)
+        ds = gdal.Open(reference_image_filename)
+        if ds is None:
+            msg = 'GDAL failed to open {}'.format(img_filename)
+            raise RuntimeError(msg)
 
-            try:
-                ds_band = ds.GetRasterBand(1)
-                ds_transform = ds.GetGeoTransform()
-                ds_srs = osr.SpatialReference()
-                ds_srs.ImportFromWkt(ds.GetProjection())
-            except Exception:
-                raise
+        try:
+            ds_band = ds.GetRasterBand(1)
+            ds_transform = ds.GetGeoTransform()
+            ds_srs = osr.SpatialReference()
+            ds_srs.ImportFromWkt(ds.GetProjection())
+        except Exception:
+            raise
 
-            number_of_lines = int(ds_band.YSize)
-            number_of_samples = int(ds_band.XSize)
-
-            update_band_attributes(band, ds_transform,
-                                   number_of_lines, number_of_samples,
-                                   ds_srs.GetAttrValue('PROJECTION'))
-
-            del ds_band
-            del ds
+        number_of_lines = int(ds_band.YSize)
+        number_of_samples = int(ds_band.XSize)
+        del ds_band
 
         ######################################################################
         # Fix the projection information for the warped data
@@ -978,12 +1245,7 @@ def update_espa_xml(args, espa_metadata):
 
         # Determine whether the scene uses lonlat projection and crosses the
         # antimeridian
-        antimeridian_crossing = 0
-        if (args.projection == 'lonlat' and
-                gm.bounding_coordinates.east < 0 and
-                gm.bounding_coordinates.west > 0):
-            antimeridian_crossing = 1
-            logger.info('Data crosses the anti-meridian')
+        antimeridian_crossing = crosses_antimeridian(args, gm)
 
         # If the image extents were changed, then the scene center time is
         # meaningless so just remove it
@@ -1038,8 +1300,8 @@ def update_espa_xml(args, espa_metadata):
         (map_lr_x, map_lr_y) = convert_imageXY_to_mapXY(
             number_of_samples - 0.5, number_of_lines - 0.5, ds_transform)
 
-        # Keep the corner longitudes in the -180..180 range.  GDAL can report 
-        # corners outside the range in antimeridian crossing cases. 
+        # Keep the corner longitudes in the -180..180 range.  GDAL can report
+        # corners outside the range in antimeridian crossing cases.
         if antimeridian_crossing == 1:
             if map_ul_x > 180:
                 map_ul_x -= 360
@@ -1112,14 +1374,18 @@ def update_espa_xml(args, espa_metadata):
 
         # Walk across the top and bottom of the image
         for sample in range(0, int(number_of_samples)+1):
-            (map_x, map_y) = \
-                convert_imageXY_to_mapXY(sample, 0.0, ds_transform)
-            (top_lon, top_lat, height) = coord_tf.TransformPoint(map_x, map_y)
+            (map_x,
+             map_y) = convert_imageXY_to_mapXY(sample, 0.0, ds_transform)
+            (top_lon,
+             top_lat,
+             height) = coord_tf.TransformPoint(map_x, map_y)
 
-            (map_x, map_y) = \
-                convert_imageXY_to_mapXY(sample, number_of_lines, ds_transform)
-            (bottom_lon, bottom_lat, height) = \
-                coord_tf.TransformPoint(map_x, map_y)
+            (map_x,
+             map_y) = convert_imageXY_to_mapXY(sample, number_of_lines,
+                                               ds_transform)
+            (bottom_lon,
+             bottom_lat,
+             height) = coord_tf.TransformPoint(map_x, map_y)
 
             west_lon = min(top_lon, bottom_lon, west_lon)
             east_lon = max(top_lon, bottom_lon, east_lon)
@@ -1128,15 +1394,18 @@ def update_espa_xml(args, espa_metadata):
 
         # Walk down the left and right of the image
         for line in range(0, int(number_of_lines)+1):
-            (map_x, map_y) = \
-                convert_imageXY_to_mapXY(0.0, line, ds_transform)
-            (left_lon, left_lat, height) = \
-                coord_tf.TransformPoint(map_x, map_y)
+            (map_x,
+             map_y) = convert_imageXY_to_mapXY(0.0, line, ds_transform)
+            (left_lon,
+             left_lat,
+             height) = coord_tf.TransformPoint(map_x, map_y)
 
-            (map_x, map_y) = \
-                convert_imageXY_to_mapXY(number_of_samples, line, ds_transform)
-            (right_lon, right_lat, height) = \
-                coord_tf.TransformPoint(map_x, map_y)
+            (map_x,
+             map_y) = convert_imageXY_to_mapXY(number_of_samples, line,
+                                               ds_transform)
+            (right_lon,
+             right_lat,
+             height) = coord_tf.TransformPoint(map_x, map_y)
 
             west_lon = min(left_lon, right_lon, west_lon)
             east_lon = max(left_lon, right_lon, east_lon)
@@ -1165,116 +1434,6 @@ def update_espa_xml(args, espa_metadata):
 
     except Exception:
         raise
-
-"""
-def reformat(metadata_filename, work_directory, input_format, output_format):
-    '''
-    Description:
-      Re-format the bands to the specified format using our raw binary tools
-      or gdal, whichever is appropriate for the task.
-
-      Input espa:
-          Output Formats: envi(espa), gtiff, and hdf
-    '''
-
-    logger = EspaLogging.get_logger(settings.PROCESSING_LOGGER)
-
-    # Don't do anything if they match
-    if input_format == output_format:
-        return
-
-    # Change to the working directory
-    current_directory = os.getcwd()
-    os.chdir(work_directory)
-
-    try:
-        # Convert from our internal ESPA/ENVI format to GeoTIFF
-        if input_format == 'envi' and output_format == 'gtiff':
-            gtiff_name = metadata_filename.rstrip('.xml')
-            # Call with deletion of source files
-            cmd = ' '.join(['convert_espa_to_gtif', '--del_src_files',
-                            '--xml', metadata_filename,
-                            '--gtif', gtiff_name])
-
-            output = ''
-            try:
-                output = utilities.execute_cmd(cmd)
-
-                # Rename the XML file back to *.xml from *_gtif.xml
-                meta_gtiff_name = metadata_filename.split('.xml')[0]
-                meta_gtiff_name = ''.join([meta_gtiff_name, '_gtif.xml'])
-
-                os.rename(meta_gtiff_name, metadata_filename)
-            finally:
-                if len(output) > 0:
-                    logger.info(output)
-
-            # Remove all the *.tfw files since gtiff was chosen a bunch may
-            # be present
-            files_to_remove = glob.glob('*.tfw')
-            if len(files_to_remove) > 0:
-                cmd = ' '.join(['rm', '-f'] + files_to_remove)
-                logger.info(' '.join(['REMOVING TFW DATA COMMAND:', cmd]))
-
-                output = ''
-                try:
-                    output = utilities.execute_cmd(cmd)
-                finally:
-                    if len(output) > 0:
-                        logger.info(output)
-
-        # Convert from our internal ESPA/ENVI format to HDF
-        elif input_format == 'envi' and output_format == 'hdf-eos2':
-            # convert_espa_to_hdf
-            hdf_name = metadata_filename.replace('.xml', '.hdf')
-            # Call with deletion of source files
-            cmd = ' '.join(['convert_espa_to_hdf', '--del_src_files',
-                            '--xml', metadata_filename,
-                            '--hdf', hdf_name])
-
-            output = ''
-            try:
-                output = utilities.execute_cmd(cmd)
-
-                # Rename the XML file back to *.xml from *_hdf.xml
-                meta_name = metadata_filename.replace('.xml', '_hdf.xml')
-
-                os.rename(meta_name, metadata_filename)
-            finally:
-                if len(output) > 0:
-                    logger.info(output)
-
-        # Convert from our internal ESPA/ENVI format to NetCDF
-        elif input_format == 'envi' and output_format == 'netcdf':
-            # convert_espa_to_netcdf
-            netcdf_name = metadata_filename.replace('.xml', '.nc')
-            # Call with deletion of source files
-            cmd = ' '.join(['convert_espa_to_netcdf',
-                            '--del_src_files',
-                            '--xml', metadata_filename,
-                            '--netcdf', netcdf_name])
-
-            output = ''
-            try:
-                output = utilities.execute_cmd(cmd)
-
-                # Rename the XML file back to *.xml from *_nc.xml
-                meta_name = metadata_filename.replace('.xml', '_nc.xml')
-
-                os.rename(meta_name, metadata_filename)
-            finally:
-                if len(output) > 0:
-                    logger.info(output)
-
-        # Requested conversion not implemented
-        else:
-            raise ValueError("Unsupported reformat combination (%s, %s)"
-                             % (input_format, output_format))
-
-    finally:
-        # Change back to the previous directory
-        os.chdir(current_directory)
-"""
 
 
 def list_gdal_drivers():
@@ -1345,26 +1504,13 @@ def build_base_warp_command(args, original_proj4=None):
     return cmd
 
 
-class CommandLineError(Exception):
-    pass
-
-
 def main():
     parser = build_command_line_arguments()
     args = parser.parse_args()
 
     setup_logging(args)
 
-    if (args.extent_minx or args.extent_miny or args.extent_maxx
-            or args.extent_maxy or args.extent_units):
-        if (not args.extent_minx or not args.extent_miny
-                or not args.extent_maxx or not args.extent_maxy
-                or not args.extent_units):
-            raise CommandLineError('All extent arguments must be specified')
-
-    if args.pixel_size or args.pixel_size_units:
-        if not args.pixel_size or not args.pixel_size_units:
-            raise CommandLineError('All pixel size arguments must be specified')
+    verify_command_line(args)
 
     # We are only supporting ENVI format since this is used by ESPA.
     delete_gdal_drivers(['ENVI'])
@@ -1373,8 +1519,8 @@ def main():
     em = objectify.ElementMaker(annotate=False, namespace=None, nsmap=None)
 
     espa_metadata = Metadata(args.xml_filename)
+    global_metadata = espa_metadata.xml_object.global_metadata
     bands = espa_metadata.xml_object.bands
-    satellite = espa_metadata.xml_object.global_metadata.satellite
     bounding_coordinates = (espa_metadata.xml_object.global_metadata.
                             bounding_coordinates)
 
@@ -1396,113 +1542,39 @@ def main():
             bounding_coordinates.east < 0 and bounding_coordinates.west > 0):
         base_warp_command.extend(['--config', 'CENTER_LONG', '180'])
 
+    # Turn GDAL PAM off to prevent *.aux.xml files
+    os.environ['GDAL_PAM_ENABLED'] = 'NO'
+
     # Process through the bands in the XML file
     for band in bands.band:
         img_filename = str(band.file_name)
         hdr_filename = img_filename.replace('.img', '.hdr')
         logger.info("Processing %s" % img_filename)
 
-        # Reset the resample method to the user specified value
-        resample_method = args.resample_method
+        resample_method = determine_resample_method(args, band)
 
-        # Always use near for qa bands
-        if band.attrib['category'] == 'qa':
-            resample_method = 'near'  # over-ride with 'near'
+        pixel_size = determine_pixel_size(args, global_metadata, band)
 
-        # Update the XML metadata object for the resampling method used
-        # Later update_espa_xml is used to update the XML file
-        if resample_method == 'near':
-            band.resample_method = em.item('nearest neighbor')
-        if resample_method == 'bilinear':
-            band.resample_method = em.item('bilinear')
-        if resample_method == 'cubic':
-            band.resample_method = em.item('cubic convolution')
+        no_data_value = determine_no_data_value(img_filename)
 
-        # Figure out the pixel size to use
-        pixel_size = args.pixel_size
+        warped_img_filename = 'warped-%s' % img_filename
+        warped_hdr_filename = 'warped-%s' % hdr_filename
 
-        # EXECUTIVE DECISION(Calli)
-        # - If the band is (Landsat 7 or 8) and Band 8 do not resize
-        #   the pixels.
-        if ((satellite == 'LANDSAT_7' or satellite == 'LANDSAT_8') and
-                band.attrib['name'] == 'b8'):
-            if args.projection == 'lonlat':
-                pixel_size = settings.DEG_FOR_15_METERS
-            else:
-                pixel_size = float(band.pixel_size.attrib['x'])
-
-        # Open the image to read the no data value out since the internal
-        # ENVI driver for GDAL does not output it, even if it is known
-        ds = gdal.Open(img_filename)
-        if ds is None:
-            raise RuntimeError('GDAL failed to open ({})'.format(img_filename))
-
-        ds_band = None
-        ds_band = ds.GetRasterBand(1)
-
-        # Save the no data value since gdalwarp does not write it out when
-        # using the ENVI format
-        no_data_value = ds_band.GetNoDataValue()
-        if no_data_value is not None:
-            no_data_value = str(no_data_value)
-
-        # Force a freeing of the memory
-        del ds_band
-        del ds
-
-        tmp_img_filename = 'tmp-%s' % img_filename
-        tmp_hdr_filename = 'tmp-%s' % hdr_filename
-
-        warp_image(img_filename, tmp_img_filename,
+        warp_image(img_filename, warped_img_filename,
                    base_warp_command=base_warp_command,
                    resample_method=resample_method,
                    pixel_size=pixel_size,
                    no_data_value=no_data_value)
 
-        ##################################################################
-        # Get new everything for the re-projected band
-        ##################################################################
+        verify_warping(warped_img_filename)
 
-        # Update the tmp ENVI header with our own values for some fields
-        sb = StringIO()
-        with open(tmp_hdr_filename, 'r') as tmp_fd:
-            while True:
-                line = tmp_fd.readline()
-                if not line:
-                    break
-                if (line.startswith('data ignore value') or
-                        line.startswith('description')):
-                    pass
-                else:
-                    sb.write(line)
+        fix_envi_header(no_data_value, warped_hdr_filename)
 
-                if line.startswith('description'):
-                    # This may be on multiple lines so read lines until
-                    # we find the closing brace
-                    if not line.strip().endswith('}'):
-                        while 1:
-                            next_line = tmp_fd.readline()
-                            if (not next_line or
-                                    next_line.strip().endswith('}')):
-                                break
-                    sb.write('description = {ESPA-generated file}\n')
-                elif (line.startswith('data type') and
-                      (no_data_value is not None)):
-                    sb.write('data ignore value = %s\n' % no_data_value)
+        replace_product_files(img_filename, hdr_filename,
+                              warped_img_filename, warped_hdr_filename)
 
-        # Do the actual replace here
-        with open(tmp_hdr_filename, 'w') as tmp_fd:
-            tmp_fd.write(sb.getvalue())
-
-        # Remove the original files, they are replaced in following code
-        if os.path.exists(img_filename):
-            os.unlink(img_filename)
-        if os.path.exists(hdr_filename):
-            os.unlink(hdr_filename)
-
-        # Rename the temps file back to the original name
-        os.rename(tmp_img_filename, img_filename)
-        os.rename(tmp_hdr_filename, hdr_filename)
+    # Remove the environment variable we set above
+    del os.environ['GDAL_PAM_ENABLED']
 
     # Update the XML to reflect the new warped output
     update_espa_xml(args, espa_metadata)
