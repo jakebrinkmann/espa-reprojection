@@ -1575,6 +1575,8 @@ def main():
 
     setup_logging(args)
 
+    logger.info('BEGIN - Reprojection Processing')
+
     verify_command_line(args)
 
     # We are only supporting ENVI format since this is used by ESPA.
@@ -1659,8 +1661,8 @@ if __name__ == '__main__':
     except Exception:
         if logger is not None:
             logger.exception('Exception Encountered')
-            logger.error('Processing Terminated - Failure')
+            logger.error('END - Reprojection Processing - Failure')
         sys.exit(1)
 
     if logger is not None:
-        logger.info('Processing Terminated - Success')
+        logger.info('END - Reprojection Processing - Success')
