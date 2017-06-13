@@ -9,7 +9,7 @@
 TOP = ..
 include $(TOP)/make.config
 
-SCRIPTS = reprojection.py
+SCRIPTS = espa_reprojection.py
 
 #-----------------------------------------------------------------------------
 all:

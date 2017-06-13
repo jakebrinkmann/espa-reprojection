@@ -30,7 +30,7 @@ import parameters
 """
 
 
-VERSION = 'Reprojection 1.0.0'
+VERSION = 'espa_reprojection 1.0.0'
 
 
 # We are only supporting one radius when warping to sinusoidal
@@ -580,8 +580,7 @@ def determine_pixel_size(args, global_metadata, band):
     pixel_size = args.pixel_size
 
     # EXECUTIVE DECISION(Calli)
-    # - If the band is (Landsat 7 or 8) and Band 8 do not resize
-    #   the pixels.
+    # - If the band is (Landsat 7 or 8) and Band 8 do not resize the pixels
     if ((global_metadata.satellite == 'LANDSAT_7' or
             global_metadata.satellite == 'LANDSAT_8') and
             band.attrib['name'] == 'b8'):
@@ -862,7 +861,7 @@ class InsufficientExtentError(Exception):
 
 
 def build_image_extents_string(args, target_proj4):
-    """Build the gdal_warp image extents string from the determined min and max
+    """Build the gdalwarp image extents string from the determined min and max
        values
 
     Returns:
@@ -945,8 +944,7 @@ def verify_warping(img_filename):
     cmd = ['gdalinfo', '-stats', img_filename]
     logger.debug('Verifying warp with {}'.format(' '.join(cmd)))
     try:
-        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT,
-                                         shell=True)
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
 
         if WARP_ERROR_STRING in output:
 
@@ -1182,7 +1180,6 @@ def update_albers_parameters(args, gm, ds_srs, old_proj_params):
     if 'datum' in args:
         gm.projection_information.attrib['datum'] = args.datum
     else:
-        print args
         gm.projection_information.attrib['datum'] = WGS84
 
 
@@ -1580,7 +1577,7 @@ def main():
     verify_command_line(args)
 
     # We are only supporting ENVI format since this is used by ESPA.
-    delete_gdal_drivers(['ENVI'])
+    delete_gdal_drivers(exclusions=['ENVI'])
 
     # Create an element maker for new items
     em = objectify.ElementMaker(annotate=False, namespace=None, nsmap=None)
@@ -1609,13 +1606,11 @@ def main():
             bounding_coordinates.east < 0 and bounding_coordinates.west > 0):
         base_warp_command.extend(['--config', 'CENTER_LONG', '180'])
 
-    # Turn GDAL PAM off to prevent *.aux.xml files
-    os.environ['GDAL_PAM_ENABLED'] = 'NO'
-
     # Process through the bands in the XML file
     for band in bands.band:
         img_filename = str(band.file_name)
         hdr_filename = img_filename.replace('.img', '.hdr')
+        aux_filename = img_filename.replace('.img', '.img.aux.xml')
         logger.info("Processing %s" % img_filename)
 
         resample_method = determine_resample_method(args, band)
@@ -1626,6 +1621,7 @@ def main():
 
         warped_img_filename = 'warped-%s' % img_filename
         warped_hdr_filename = 'warped-%s' % hdr_filename
+        warped_aux_filename = 'warped-%s' % aux_filename
 
         warp_image(img_filename, warped_img_filename,
                    base_warp_command=base_warp_command,
@@ -1640,8 +1636,9 @@ def main():
         replace_product_files(img_filename, hdr_filename,
                               warped_img_filename, warped_hdr_filename)
 
-    # Remove the environment variable we set above
-    del os.environ['GDAL_PAM_ENABLED']
+        # Remove the *.aux.xml file generated during warp
+        if os.path.exists(warped_aux_filename):
+            os.unlink(warped_aux_filename)
 
     # Update the XML to reflect the new warped output
     update_espa_xml(args, espa_metadata)
