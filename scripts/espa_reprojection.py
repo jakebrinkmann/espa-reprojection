@@ -1211,7 +1211,7 @@ def update_sinu_parameters(gm, ds_srs, old_proj_params):
 def convert_imageXY_to_mapXY(image_x, image_y, transform):
     '''
     Description:
-      Translate image coordinates into mapp coordinates
+      Translate image coordinates into map coordinates
     '''
 
     map_x = transform[0] + image_x * transform[1] + image_y * transform[2]
@@ -1227,7 +1227,7 @@ XML_BAND_TRANSLATION = {
 }
 
 
-# All of these bands are equivalent with regards to lins/samples and
+# All of these bands are equivalent with regards to lines/samples and
 # projection information
 REFERENCE_BANDS = {
     'L1TP': ['b1', 'b2', 'b3', 'b4', 'b5', 'b7', 'bqa'],
@@ -1364,7 +1364,7 @@ def update_espa_xml(args, espa_metadata):
 
         # Keep the corner longitudes in the -180..180 range.  GDAL can report
         # corners outside the range in antimeridian crossing cases.
-        if antimeridian_crossing == 1:
+        if antimeridian_crossing:
             if map_ul_x > 180:
                 map_ul_x -= 360
             if map_lr_x > 180:
@@ -1392,7 +1392,7 @@ def update_espa_xml(args, espa_metadata):
                     coord_tf.TransformPoint(map_ul_x, map_ul_y)
 
                 # Keep the corner longitudes in the -180..180 range.
-                if antimeridian_crossing == 1:
+                if antimeridian_crossing:
                     if lon > 180:
                         lon -= 360
                     if lon < -180:
@@ -1406,7 +1406,7 @@ def update_espa_xml(args, espa_metadata):
                     coord_tf.TransformPoint(map_lr_x, map_lr_y)
 
                 # Keep the corner longitudes in the -180..180 range.
-                if antimeridian_crossing == 1:
+                if antimeridian_crossing:
                     if lon > 180:
                         lon -= 360
                     if lon < -180:
@@ -1476,7 +1476,7 @@ def update_espa_xml(args, espa_metadata):
 
         # Fix the bounding coordinates if they are outside the valid range,
         # which can happen in antimeridian crossing cases
-        if antimeridian_crossing == 1:
+        if antimeridian_crossing:
             if west_lon < -180:
                 west_lon += 360
             if east_lon > 180:
