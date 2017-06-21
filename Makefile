@@ -1,7 +1,7 @@
 #-----------------------------------------------------------------------------
 # Makefile
 #
-# Project Name: product formatter
+# Project Name: reprojection
 #-----------------------------------------------------------------------------
 .PHONY: check-environment all install clean all-script install-script clean-script rpms
 
