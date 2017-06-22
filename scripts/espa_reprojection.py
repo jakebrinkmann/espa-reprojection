@@ -22,14 +22,6 @@ from espa import Metadata
 from cStringIO import StringIO
 
 
-"""
-import utilities
-from logging_tools import EspaLogging
-from espa_exception import ESPAException
-import parameters
-"""
-
-
 VERSION = 'espa_reprojection 1.0.0'
 
 
