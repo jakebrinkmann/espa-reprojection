@@ -23,7 +23,7 @@ This project is unsupported software provided by the US Geological Survey (USGS)
 make install
 ```
 ## Usage
-See `espa-reprojection.py --help` for command line details.
+See `espa_reprojection.py --help` for command line details.
 
 ### Data Processing Requirements
 This version of the Reprojection application requires the input for reprojection to be in the ESPA Raw Binary (ESPA's internal) format.
