@@ -1219,15 +1219,47 @@ XML_BAND_TRANSLATION = {
 }
 
 
-# All of these bands are equivalent with regards to lines/samples and
-# projection information
+# All of these bands can be used for the reference for the reprojected data
+# No concern mixing Landsat and Modis since we can only be processing one at
+# a time
 REFERENCE_BANDS = {
     'L1TP': ['b1', 'b2', 'b3', 'b4', 'b5', 'b7', 'bqa'],
     'level2_qa': ['pixel_qa'],
     'toa_refl': ['toa_band1', 'toa_band2', 'toa_band3', 'toa_band4',
                  'toa_band5', 'toa_band7', 'toa_band1'],
     'sr_refl': ['sr_band1', 'sr_band2', 'sr_band3', 'sr_band4',
-                'sr_band5', 'sr_band7', 'sr_band1'],
+                'sr_band5', 'sr_band7', 'sr_band1',
+                'sur_refl_b01_1', 'sur_refl_b02_1', 'sur_refl_b03_1',
+                'sur_refl_b04_1', 'sur_refl_b05_1', 'sur_refl_b06_1',
+                'sur_refl_b07_1',
+                'sur_refl_b01', 'sur_refl_b02', 'sur_refl_b03',
+                'sur_refl_b04', 'sur_refl_b05', 'sur_refl_b06',
+                'sur_refl_b07'],
+    'land_surf_temp': ['LST_Day_1km', 'LST_Night_1km'],
+    'spectral_indices': ['250m 16 days NDVI',
+                         '250m 16 days EVI',
+                         '250m 16 days red reflectance',
+                         '250m 16 days NIR reflectance',
+                         '250m 16 days blue reflectance',
+                         '250m 16 days MIR reflectance',
+                         '500m 16 days NDVI',
+                         '500m 16 days EVI',
+                         '500m 16 days red reflectance',
+                         '500m 16 days NIR reflectance',
+                         '500m 16 days blue reflectance',
+                         '500m 16 days MIR reflectance',
+                         '1 km 16 days NDVI',
+                         '1 km 16 days EVI',
+                         '1 km 16 days red reflectance',
+                         '1 km 16 days NIR reflectance',
+                         '1 km 16 days blue reflectance',
+                         '1 km 16 days MIR reflectance',
+                         '1 km monthly NDVI',
+                         '1 km monthly EVI',
+                         '1 km monthly red reflectance',
+                         '1 km monthly NIR reflectance',
+                         '1 km monthly blue reflectance',
+                         '1 km monthly MIR reflectance']
 }
 
 
@@ -1338,7 +1370,7 @@ def update_espa_xml(args, espa_metadata):
                 update_albers_parameters(args, gm, ds_srs, old_proj_params)
 
             elif projection_name.lower().startswith('sinusoidal'):
-                update_sinu_parameters(args, gm, ds_srs, old_proj_params)
+                update_sinu_parameters(gm, ds_srs, old_proj_params)
 
         else:
             # Must be Geographic Projection
