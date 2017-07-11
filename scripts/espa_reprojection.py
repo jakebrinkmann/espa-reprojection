@@ -1653,7 +1653,9 @@ def main():
                    pixel_size=pixel_size,
                    no_data_value=no_data_value)
 
-        verify_warping(warped_img_filename)
+        if (band.attrib['category'] == 'image' and
+                band.attrib['name'] != 'sr_atmos_opacity'):
+            verify_warping(warped_img_filename)
 
         fix_envi_header(no_data_value, warped_hdr_filename)
 
