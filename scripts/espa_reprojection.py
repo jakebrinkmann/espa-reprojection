@@ -22,7 +22,7 @@ from espa import Metadata
 from cStringIO import StringIO
 
 
-VERSION = 'espa_reprojection 1.0.0'
+VERSION = 'espa_reprojection 1.0.1'
 
 
 # We are only supporting one radius when warping to sinusoidal
