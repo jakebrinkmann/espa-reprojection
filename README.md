@@ -1,6 +1,6 @@
-## ESPA Reprojection Version 1.0.0 - Release Notes
+## ESPA Reprojection Version 1.0.1 - Release Notes
 
-See git tag [v1.0.0]
+See git tag [v1.0.1]
 
 This project contains application source code for warping/reprojecting ESPA Raw Binary (ESPA's internal) formatted data.  This application is intended to be used by ESPA Processing.  This application does not perform the reprojection, it is a wrapper around GDAL's gdalwarp.
 
@@ -8,7 +8,8 @@ This project contains application source code for warping/reprojecting ESPA Raw 
 This project is unsupported software provided by the US Geological Survey (USGS) Earth Resources Observation and Science (EROS) Land Satellite Data Systems (LSDS) Science Research and Development (LSRD) Project.  For questions regarding products produced by this source code, please contact the Landsat Contact Us page and specify USGS CDR/ECV in the "Regarding" section. https://landsat.usgs.gov/contactus.php
 
 ## Release Notes
-* Initial implementation derived from original implementation within ESPA Processing
+* Version change
+* Only perform validation on image bands
 
 ## Installation
 
