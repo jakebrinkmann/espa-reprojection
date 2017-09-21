@@ -93,7 +93,7 @@ def setup_logging(args):
 
     # Setup the logging level
     logging_level = logging.INFO
-    if args.debug:
+    if True:
         logging_level = logging.DEBUG
 
     handler = logging.StreamHandler(sys.stdout)
@@ -1062,6 +1062,7 @@ def update_bands(args, espa_metadata):
         logger.info('Updating XML for {}'.format(img_filename))
 
         resample_method = determine_resample_method(args, band)
+        print('RESAMPLE METHOD: {}'.format(resample_method))
 
         # Update the XML metadata object for the resampling method used
         band.resample_method = \
@@ -1091,7 +1092,7 @@ def update_bands(args, espa_metadata):
         del ds
 
 
-def update_utm_parameters(gm, ds_srs, old_proj_params):
+def update_utm_parameters(gm, ds_srs):
     logger.info('Updating Projection with UTM Parameters')
 
     # Create an element maker
@@ -1105,14 +1106,14 @@ def update_utm_parameters(gm, ds_srs, old_proj_params):
     utm_proj_params.zone_code = em.item(zone)
 
     # Add the object to the projection information
-    gm.projection_information.replace(old_proj_params, utm_proj_params)
+    gm.projection_information.append(utm_proj_params)
 
     # Update the attribute values
     gm.projection_information.attrib['projection'] = 'UTM'
     gm.projection_information.attrib['datum'] = WGS84
 
 
-def update_polar_parameters(gm, ds_srs, old_proj_params):
+def update_polar_parameters(gm, ds_srs):
     logger.info('Updating Projection with Polar Stereographic Parameters')
 
     # Create an element maker
@@ -1132,13 +1133,14 @@ def update_polar_parameters(gm, ds_srs, old_proj_params):
     ps_proj_params.false_northing = em.item(false_northing)
 
     # Add the object to the projection information
-    gm.projection_information.replace(old_proj_params, ps_proj_params)
+    gm.projection_information.append(ps_proj_params)
+
     # Update the attribute values
     gm.projection_information.attrib['projection'] = 'PS'
     gm.projection_information.attrib['datum'] = WGS84
 
 
-def update_albers_parameters(args, gm, ds_srs, old_proj_params):
+def update_albers_parameters(args, gm, ds_srs):
     logger.info('Updating Projection with Albers Equal Area Parameters')
 
     # Create an element maker
@@ -1162,7 +1164,7 @@ def update_albers_parameters(args, gm, ds_srs, old_proj_params):
     albers_proj_params.false_northing = em.item(false_northing)
 
     # Add the object to the projection information
-    gm.projection_information.replace(old_proj_params, albers_proj_params)
+    gm.projection_information.append(albers_proj_params)
 
     # Update the attribute values
     gm.projection_information.attrib['projection'] = 'ALBERS'
@@ -1175,7 +1177,7 @@ def update_albers_parameters(args, gm, ds_srs, old_proj_params):
         gm.projection_information.attrib['datum'] = WGS84
 
 
-def update_sinu_parameters(gm, ds_srs, old_proj_params):
+def update_sinu_parameters(gm, ds_srs):
     logger.info('Updating Projection with Sinusoidal Parameters')
 
     # Create an element maker
@@ -1194,7 +1196,7 @@ def update_sinu_parameters(gm, ds_srs, old_proj_params):
     sin_proj_params.false_northing = em.item(false_northing)
 
     # Add the object to the projection information
-    gm.projection_information.replace(old_proj_params, sin_proj_params)
+    gm.projection_information.append(sin_proj_params)
 
     # Update the attribute values
     gm.projection_information.attrib['projection'] = 'SIN'
@@ -1259,7 +1261,9 @@ REFERENCE_BANDS = {
                          '1 km monthly red reflectance',
                          '1 km monthly NIR reflectance',
                          '1 km monthly blue reflectance',
-                         '1 km monthly MIR reflectance']
+                         '1 km monthly MIR reflectance'],
+    'goes_full_disk': ['b2',  'b3'],
+    'goes_conus': ['b2', 'b3']
 }
 
 
@@ -1274,6 +1278,9 @@ def determine_ref_image_filename(espa_metadata):
     for band in espa_metadata.xml_object.bands.band:
         product = band.attrib['product']
         name = band.attrib['name']
+        print('-'*30); print('--> {} | {} <---'.format(product, name))
+        print('{} in {}? {}'.format(product, REFERENCE_BANDS.keys(), product in REFERENCE_BANDS))
+        print('{} in {}? {}'.format(name, REFERENCE_BANDS.get(product,''), name in REFERENCE_BANDS.get(product,'')))
         if product in REFERENCE_BANDS and name in REFERENCE_BANDS[product]:
 
             img_filename = str(band.file_name)
@@ -1299,7 +1306,7 @@ def crosses_antimeridian(args, global_metadata):
 
 
 def update_espa_xml(args, espa_metadata):
-
+    print('UPDATE ESPA XML! ...')
     try:
         # Create an element maker
         em = objectify.ElementMaker(annotate=False, namespace=None, nsmap=None)
@@ -1322,6 +1329,8 @@ def update_espa_xml(args, espa_metadata):
 
         number_of_lines = int(ds_band.YSize)
         number_of_samples = int(ds_band.XSize)
+        print('@'*80)
+        print('LINES: {} SAMPS: {}'.format(number_of_lines, number_of_samples))
         del ds_band
 
         ######################################################################
@@ -1356,21 +1365,21 @@ def update_espa_xml(args, espa_metadata):
             elif 'sin_proj_params' in item.tag:
                 old_proj_params = item
                 break
-
+        
         # Rebuild the projection parameters
         projection_name = ds_srs.GetAttrValue('PROJECTION')
         if projection_name is not None:
             if projection_name.lower().startswith('transverse_mercator'):
-                update_utm_parameters(gm, ds_srs, old_proj_params)
+                update_utm_parameters(gm, ds_srs)
 
             elif projection_name.lower().startswith('polar'):
-                update_polar_parameters(gm, ds_srs, old_proj_params)
+                update_polar_parameters(gm, ds_srs)
 
             elif projection_name.lower().startswith('albers'):
-                update_albers_parameters(args, gm, ds_srs, old_proj_params)
+                update_albers_parameters(args, gm, ds_srs)
 
             elif projection_name.lower().startswith('sinusoidal'):
-                update_sinu_parameters(gm, ds_srs, old_proj_params)
+                update_sinu_parameters(gm, ds_srs)
 
         else:
             # Must be Geographic Projection
@@ -1378,6 +1387,8 @@ def update_espa_xml(args, espa_metadata):
             gm.projection_information.attrib['projection'] = 'GEO'
             gm.projection_information.attrib['datum'] = WGS84
             gm.projection_information.attrib['units'] = 'degrees'
+
+        if old_proj_params is not None:
             gm.projection_information.remove(old_proj_params)
 
         # Fix the UL and LR center of pixel map coordinates
@@ -1640,13 +1651,16 @@ def main():
         resample_method = determine_resample_method(args, band)
 
         pixel_size = determine_pixel_size(args, global_metadata, band)
+        print('PIXEL SIZE: {}'.format(pixel_size))
 
         no_data_value = determine_no_data_value(img_filename)
+        print('NO DATA VALUE: {}'.format(no_data_value))
 
         warped_img_filename = 'warped-%s' % img_filename
         warped_hdr_filename = 'warped-%s' % hdr_filename
         warped_aux_filename = 'warped-%s' % aux_filename
 
+        print('WARP IMAGE: {}'.format(warped_img_filename))
         warp_image(img_filename, warped_img_filename,
                    base_warp_command=base_warp_command,
                    resample_method=resample_method,
@@ -1655,6 +1669,7 @@ def main():
 
         if (band.attrib['category'] == 'image' and
                 band.attrib['name'] != 'sr_atmos_opacity'):
+            print('VERIFY WARP IMAGE: {}'.format(warped_img_filename))
             verify_warping(warped_img_filename)
 
         fix_envi_header(no_data_value, warped_hdr_filename)
