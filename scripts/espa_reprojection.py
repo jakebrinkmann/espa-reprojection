@@ -915,7 +915,11 @@ def warp_image(source_file, output_file,
         try:
             output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as error:
-            logger.error('Warping failed')
+            output, status = " ".join(error.output.split()), error.returncode
+            message = ('Warping failed [{}] returned error code [{}]'
+                    .format(cmd, status))
+            message = ' Stdout/Stderr is: '.join([message, output])
+            logger.error(message)
             raise
 
     finally:
