@@ -1,6 +1,6 @@
-## ESPA Reprojection Version 1.0.1 - Release Notes
+## ESPA Reprojection Version 1.0.2 - Release Notes
 
-See git tag [v1.0.1]
+See git tag [v1.0.2]
 
 This project contains application source code for warping/reprojecting ESPA Raw Binary (ESPA's internal) formatted data.  This application is intended to be used by ESPA Processing.  This application does not perform the reprojection, it is a wrapper around GDAL's gdalwarp.
 
