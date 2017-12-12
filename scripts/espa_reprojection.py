@@ -788,11 +788,11 @@ def projection_minbox(args, target_proj4):
     (ul_x, ul_y, z) = transform.TransformPoint(args.extent_minx,
                                                args.extent_maxy)
     if ul_x < 1.0 or ul_y < 1.0:
-        raise TransformPointError('Error transforming point')
+        logger.warning('Upper Left: Negative-value coordinate space')
     (lr_x, lr_y, z) = transform.TransformPoint(args.extent_maxx,
                                                args.extent_miny)
     if lr_x < 1.0 or lr_y < 1.0:
-        raise TransformPointError('Error transforming point')
+        logger.warning('Lower Right: Negative-value coordinate space')
 
     min_x = min(ul_x, lr_x)
     max_x = max(ul_x, lr_x)
@@ -808,12 +808,12 @@ def projection_minbox(args, target_proj4):
         # Upper side
         (ux, uy, z) = transform.TransformPoint(lon, args.extent_maxy)
         if ux < 1.0 or uy < 1.0:
-            raise TransformPointError('Error transforming point')
+            logger.warning('Upper Boundary: Negative-value coordinate space (%s, %s)', ux, uy)
 
         # Lower side
         (lx, ly, z) = transform.TransformPoint(lon, args.extent_miny)
         if lx < 1.0 or ly < 1.0:
-            raise TransformPointError('Error transforming point')
+            loggerin.warning('Lower Boundary: Negative-value coordinate space (%s, %s)', lx, ly)
 
         min_x = min(ux, lx, min_x)
         max_x = max(ux, lx, max_x)
@@ -825,12 +825,12 @@ def projection_minbox(args, target_proj4):
         # Left side
         (lx, ly, z) = transform.TransformPoint(args.extent_minx, lat)
         if lx < 1.0 or ly < 1.0:
-            raise TransformPointError('Error transforming point')
+            loggerin.warning('Left Boundary: Negative-value coordinate space (%s, %s)', lx, ly)
 
         # Right side
         (rx, ry, z) = transform.TransformPoint(args.extent_maxx, lat)
         if rx < 1.0 or ry < 1.0:
-            raise TransformPointError('Error transforming point')
+            loggerin.warning('Right Boundary: Negative-value coordinate space (%s, %s)', rx, ry)
 
         min_x = min(rx, lx, min_x)
         max_x = max(rx, lx, max_x)
