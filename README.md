@@ -32,7 +32,7 @@ After compiling the [espa-product-formatter](https://github.com/USGS-EROS/espa-p
 
 #### Support Information
 
-This project is unsupported software provided by the U.S. Geological Survey (USGS) Earth Resources Observation and Science (EROS) Land Satellite Data Systems (LSDS) Project. For questions regarding products produced by this source code, please contact the [Landsat Contact Us][2] page and specify USGS Level-2 in the "Regarding" section.
+This project is unsupported software provided by the U.S. Geological Survey (USGS) Earth Resources Observation and Science (EROS) Land Satellite Data Systems (LSDS) Project. For questions regarding products produced by this source code, please contact us at custserv@usgs.gov.
 
 #### Disclaimer
 
